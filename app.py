@@ -1,21 +1,20 @@
 import streamlit as st
 import pandas as pd
-from supabase import create_client, Client
-import hmac
+from infra.banco_dados import supabase
+from telas import tela_cadastro
 
 # 1. Configuração inicial da tela
 st.set_page_config(page_title="Achados & Perdidos Marina", layout="wide", page_icon="⚓")
 
-# 2. Inicialização do Cliente Supabase utilizando os Secrets
-@st.cache_resource
-def iniciar_conexao() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+# Oculta a instrução "Press Enter to submit form" dentro dos formulários
+st.markdown("""
+    <style>
+    [data-testid="InputInstructions"] { display: none; }
+    .block-container { padding-top: 2rem; padding-bottom: 0rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
-supabase = iniciar_conexao()
-
-# 3. Controle do estado da sessão
+# 2. Controle do estado da sessão
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
     st.session_state['usuario'] = None
@@ -29,7 +28,6 @@ def verificar_login(usuario_input, senha_input):
         dados = resposta.data
         
         if dados:
-            # Na v1.0, comparamos o texto simples. Posteriormente aplicaremos criptografia hash.
             if dados[0]['senha'] == senha_input:
                 st.session_state['autenticado'] = True
                 st.session_state['usuario'] = dados[0]['nome']
@@ -37,7 +35,7 @@ def verificar_login(usuario_input, senha_input):
                 return True
         return False
     except Exception as e:
-        st.error(f"Erro ao ligar à base de dados: {e}")
+        print(f"Erro ao ligar à base de dados: {e}")
         return False
 
 # --- TELA DE LOGIN ---
@@ -47,8 +45,8 @@ if not st.session_state['autenticado']:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("form_login"):
-            usuario_form = st.text_input("Usuário:")
-            senha_form = st.text_input("Senha:", type="password")
+            usuario_form = st.text_input("Usuário:", autocomplete="username")
+            senha_form = st.text_input("Senha:", type="password", autocomplete="current-password")
             botao_entrar = st.form_submit_button("Login")
             
             if botao_entrar:
@@ -66,7 +64,7 @@ else:
     st.sidebar.divider()
 
     # Opções de Navegação de acordo com o perfil
-    opcoes_menu = ["Registrar Item", "Buscar", "Dashboard"]
+    opcoes_menu = ["Buscar", "Registrar Item", "Dashboard"]
     if st.session_state['perfil'] == 'Admin':
         opcoes_menu.append("Configurações")
 
@@ -80,13 +78,12 @@ else:
         st.rerun()
 
     # Roteamento das Páginas
-    if menu == "Registrar Item":
-        st.title("📦 Registar Novo Item")
-        st.write("Módulo de inserção de dados em desenvolvimento.")
-
-    elif menu == "Buscar":
+    if menu == "Buscar":
         st.title("🔍 Buscar")
         st.write("Módulo de consulta à base de dados em desenvolvimento.")
+
+    elif menu == "Registrar Item":
+        tela_cadastro.mostrar_tela()
 
     elif menu == "Dashboard":
         st.title("📊 Dashboard")
