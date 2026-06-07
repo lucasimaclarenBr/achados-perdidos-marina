@@ -1,75 +1,105 @@
 import streamlit as st
-import pandas as pd
 from infra.banco_dados import supabase
-from telas import tela_cadastro
+from telas import tela_cadastro, tela_busca
 
-# 1. Configuração inicial da tela
-st.set_page_config(page_title="Achados & Perdidos Marina", layout="wide", page_icon="⚓")
+st.set_page_config(
+    page_title="Achados & Perdidos Marina",
+    layout="wide",
+    page_icon="⚓",
+    initial_sidebar_state="expanded",
+)
 
-# CSS global — fonte única de verdade para estilos base
 st.markdown("""
 <style>
-/* Margens gerais */
+/* ── Margens ── */
 .block-container {
     padding-top: 1rem !important;
     padding-bottom: 0rem !important;
 }
-
-/* Remove instrução "Press Enter to apply" */
 [data-testid="InputInstructions"] { display: none; }
-
-/* Divisor horizontal compacto */
 hr {
-    margin-top: 0.4rem !important;
-    margin-bottom: 0.4rem !important;
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.5rem !important;
 }
 
-/* Aba selecionada: texto branco, barra branca */
-div[data-baseweb="tab-list"] button[aria-selected="true"] p {
+/* ── Sidebar: azul marinho fixo em ambos os temas ── */
+section[data-testid="stSidebar"] {
+    background-color: #141824 !important;
+}
+section[data-testid="stSidebar"] .stMarkdown p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] p {
+    color: #c8d3e8 !important;
+}
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.1) !important;
+}
+section[data-testid="stSidebar"] button {
+    background-color: transparent !important;
+    border: 1px solid rgba(255,255,255,0.2) !important;
+    color: #c8d3e8 !important;
+}
+section[data-testid="stSidebar"] button:hover {
+    background-color: #cc0000 !important;
+    border-color: #cc0000 !important;
     color: #ffffff !important;
 }
+
+/* ── Abas ── */
+div[data-baseweb="tab-list"] button[aria-selected="true"] p {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+}
 div[data-baseweb="tab-list"] button[aria-selected="true"] {
-    border-bottom-color: #ffffff !important;
+    border-bottom-color: #00897b !important;
 }
 div[data-baseweb="tab-highlight"] {
-    background-color: #ffffff !important;
+    background-color: #00897b !important;
 }
-
-/* Aba não selecionada: cinza claro */
 div[data-baseweb="tab-list"] button[aria-selected="false"] p {
-    color: #aaaaaa !important;
+    color: #888888 !important;
 }
-
-/* Hover nas abas: branco */
 div[data-baseweb="tab-list"] button:hover p {
     color: #ffffff !important;
 }
 
-/* Hover nos botões: verde médio */
-div[data-testid="stButton"] > button:hover {
-    border-color: #2e7d4f !important;
+/* ── Botões: verde padrão ── */
+div[data-testid="stButton"] > button {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease !important;
+}
+div[data-testid="stButton"] > button:not([disabled]):hover {
+    background-color: #00897b !important;
+    border-color: #00897b !important;
     color: #ffffff !important;
-    background-color: #2e7d4f !important;
 }
 
-/* File uploader compacto */
+/* ── Download buttons ── */
+div[data-testid="stDownloadButton"] > button {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+}
+div[data-testid="stDownloadButton"] > button:hover {
+    background-color: #00897b !important;
+    border-color: #00897b !important;
+    color: #ffffff !important;
+}
+
+/* ── File uploader compacto ── */
 [data-testid="stFileUploader"] section {
     padding: 0.4rem 0.75rem !important;
     min-height: unset !important;
 }
-[data-testid="stFileUploader"] section > div {
-    gap: 0.4rem !important;
-}
-[data-testid="stFileUploaderDropzoneInstructions"] {
-    display: none !important;
-}
+[data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
 
-/* Cabeçalho de seção */
+/* ── Cabeçalho de seção ── */
 .section-header {
-    font-size: 0.78rem;
-    font-weight: 600;
+    font-size: 0.72rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: #888;
     margin-bottom: 0.4rem;
     margin-top: 0rem;
@@ -77,78 +107,94 @@ div[data-testid="stButton"] > button:hover {
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Controle do estado da sessão
-if 'autenticado' not in st.session_state:
-    st.session_state['autenticado'] = False
-    st.session_state['usuario'] = None
-    st.session_state['perfil'] = None
+# ── Sessão ──
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+    st.session_state["usuario"] = None
+    st.session_state["perfil"] = None
+    st.session_state["login"] = None
 
 
-# --- FUNÇÃO DE VALIDAÇÃO DE LOGIN ---
 def verificar_login(usuario_input, senha_input):
     try:
-        resposta = supabase.table("usuarios").select("*").eq("login", usuario_input).execute()
-        dados = resposta.data
-        if dados:
-            if dados[0]['senha'] == senha_input:
-                st.session_state['autenticado'] = True
-                st.session_state['usuario'] = dados[0]['nome']
-                st.session_state['perfil'] = dados[0]['perfil']
-                return True
+        resp = supabase.table("usuarios").select("*").eq("login", usuario_input).execute()
+        dados = resp.data
+        if dados and dados[0]["senha"] == senha_input:
+            st.session_state["autenticado"] = True
+            st.session_state["usuario"] = dados[0]["nome"]
+            st.session_state["perfil"] = dados[0]["perfil"]
+            st.session_state["login"] = dados[0]["login"]
+            return True
         return False
     except Exception as e:
-        print(f"Erro ao conectar à base de dados: {e}")
+        print(f"Erro ao conectar: {e}")
         return False
 
 
-# --- TELA DE LOGIN ---
-if not st.session_state['autenticado']:
-    st.markdown("<h2 style='text-align: center;'>Achados e Perdidos</h2>", unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([1, 2, 1])
+# ── Login ──
+if not st.session_state["autenticado"]:
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
+        try:
+            st.image("assets/logo_marina.png", width=160)
+        except Exception:
+            st.markdown("### ⚓ Marina Barra Clube")
+        st.markdown("#### Sistema de Achados e Perdidos")
+        st.markdown("---")
         with st.form("form_login"):
-            usuario_form = st.text_input("Usuário:", autocomplete="username")
-            senha_form = st.text_input("Senha:", type="password", autocomplete="current-password")
-            botao_entrar = st.form_submit_button("Login")
-
-            if botao_entrar:
+            usuario_form = st.text_input("Usuário", autocomplete="username")
+            senha_form = st.text_input("Senha", type="password", autocomplete="current-password")
+            if st.form_submit_button("Entrar", use_container_width=True):
                 if verificar_login(usuario_form, senha_form):
-                    st.success("Sessão iniciada com sucesso!")
                     st.rerun()
                 else:
                     st.error("Usuário ou senha inválidos.")
 
-# --- CONTEÚDO PRINCIPAL (APÓS AUTENTICAÇÃO) ---
+# ── App principal ──
 else:
-    st.sidebar.title("Achados & Perdidos Marina")
-    st.sidebar.write(f"Olá, **{st.session_state['usuario']}** ({st.session_state['perfil']})")
-    st.sidebar.divider()
+    with st.sidebar:
+        try:
+            st.image("assets/logo_marina.png", width=140)
+        except Exception:
+            st.markdown("**⚓ Marina Barra Clube**")
 
-    opcoes_menu = ["Buscar", "Registrar Item", "Dashboard"]
-    if st.session_state['perfil'] == 'Admin':
-        opcoes_menu.append("Configurações")
+        st.markdown("---")
+        st.markdown(
+            f"<p style='font-size:0.85rem;margin:0'>Olá, <strong>{st.session_state['usuario']}</strong></p>"
+            f"<p style='font-size:0.75rem;opacity:0.6;margin:0'>{st.session_state['perfil']}</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
 
-    menu = st.sidebar.radio("Navegação", opcoes_menu)
-    st.sidebar.divider()
+        opcoes_menu = {
+            "🔍  Buscar":         "Buscar",
+            "📦  Registrar Item": "Registrar Item",
+            "📊  Dashboard":      "Dashboard",
+        }
+        if st.session_state["perfil"] == "Admin":
+            opcoes_menu["⚙️  Configurações"] = "Configurações"
 
-    if st.sidebar.button("Terminar Sessão (Logout)"):
-        st.session_state['autenticado'] = False
-        st.session_state['usuario'] = None
-        st.session_state['perfil'] = None
-        st.rerun()
+        menu_label = st.radio(
+            "nav",
+            options=list(opcoes_menu.keys()),
+            label_visibility="collapsed",
+        )
+        menu = opcoes_menu[menu_label]
+
+        st.markdown("---")
+        if st.button("Sair", use_container_width=True):
+            for k in ["autenticado", "usuario", "perfil", "login"]:
+                st.session_state[k] = None
+            st.session_state["autenticado"] = False
+            st.rerun()
 
     if menu == "Buscar":
-        st.title("Buscar")
-        st.write("Módulo de consulta à base de dados em desenvolvimento.")
-
+        tela_busca.mostrar_tela()
     elif menu == "Registrar Item":
         tela_cadastro.mostrar_tela()
-
     elif menu == "Dashboard":
-        st.title("Dashboard")
-        st.write("Módulo de indicadores em desenvolvimento.")
-
+        st.title("📊 Dashboard")
+        st.info("Módulo de indicadores em desenvolvimento.")
     elif menu == "Configurações":
-        st.title("Configurações do Sistema")
-        st.write("Módulo de administração de usuários em desenvolvimento.")
+        st.title("⚙️ Configurações")
+        st.info("Módulo de administração de usuários em desenvolvimento.")

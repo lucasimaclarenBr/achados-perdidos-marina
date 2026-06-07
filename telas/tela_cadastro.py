@@ -28,20 +28,39 @@ CATEGORIAS = {
 # =============================================================================
 
 def _formatar_telefone(valor: str) -> str:
-    digitos = re.sub(r"\D", "", valor)[:11]
+    digitos = re.sub(r"\D", "", valor)
+    d = digitos[:11]
     if len(digitos) <= 2:
         return digitos
     if len(digitos) <= 7:
-        return f"({digitos[:2]}) {digitos[2:]}"
-    return f"({digitos[:2]}) {digitos[2:7]}-{digitos[7:]}"
+        return f"({d[:2]}) {d[2:]}"
+    formatted = f"({d[:2]}) {d[2:7]}-{d[7:11]}"
+    # Mantém dígitos excedentes visíveis para o usuário poder apagá-los
+    if len(digitos) > 11:
+        formatted += digitos[11:]
+    return formatted
 
 
 def _validar_telefone(telefone: str) -> bool:
     return len(re.sub(r"\D", "", telefone)) == 11
 
 
+def _formatar_titulo(valor: str) -> str:
+    digitos = re.sub(r"\D", "", valor)
+    if len(digitos) <= 4:
+        return digitos
+    formatted = f"{digitos[:4]}-{digitos[4:6]}"
+    if len(digitos) > 6:
+        formatted += digitos[6:]  # excesso visível para o usuário apagar
+    return formatted
+
+
+def _validar_titulo(titulo: str) -> bool:
+    return bool(re.fullmatch(r"\d{4}-\d{2}", titulo))
+
+
 def _gerar_todos_codigos(sigla: str, capacidade: int) -> list[str]:
-    return [f"{str(i).zfill(3)}{sigla}" for i in range(1, capacidade + 1)]
+    return [f"{str(i).zfill(4)} {sigla}" for i in range(1, capacidade + 1)]
 
 
 @st.cache_data(ttl=30)
@@ -91,17 +110,42 @@ def _campo_telefone(label: str, key: str) -> str:
         key=key,
         on_change=_ao_alterar,
         placeholder="(21) 99999-9999",
+        help="Formato: (DDD) 9XXXX-XXXX — 11 dígitos no total",
     )
     if valor:
-        if not _validar_telefone(valor):
-            digitos = len(re.sub(r"\D", "", valor))
-            st.caption(f"⚠️ Número inválido ({digitos} dígitos). Use DDD + 9 dígitos.")
+        digitos = len(re.sub(r"\D", "", valor))
+        if digitos > 11:
+            st.caption(
+                f"⚠️ Número muito longo ({digitos} dígitos). "
+                "Use o padrão (21) 99999-9999."
+            )
+        elif digitos < 11:
+            st.caption(
+                f"⚠️ Número incompleto ({digitos} dígitos). "
+                "Use o padrão (21) 99999-9999."
+            )
     return valor
 
 
-def _limpar_estado(chaves: list[str]) -> None:
-    for chave in chaves:
-        st.session_state.pop(chave, None)
+def _campo_titulo(label: str, key: str) -> str:
+    def _ao_alterar():
+        st.session_state[key] = _formatar_titulo(st.session_state[key])
+
+    valor = st.text_input(
+        label,
+        key=key,
+        on_change=_ao_alterar,
+        placeholder="1234-10",
+        help="Formato: 4 dígitos, hífen, 2 dígitos — ex.: 1234-10",
+    )
+    if valor:
+        digitos = len(re.sub(r"\D", "", valor))
+        if not _validar_titulo(valor):
+            if digitos > 6:
+                st.caption(f"⚠️ Título muito longo ({digitos} dígitos). Use o padrão 1234-10.")
+            else:
+                st.caption(f"⚠️ Título incompleto ({digitos} dígitos). Use o padrão 1234-10.")
+    return valor
 
 
 # =============================================================================
@@ -115,10 +159,17 @@ def mostrar_tela():
         ["📦 Registrar Item Encontrado", "🔎 Registrar Busca Ativa (Dono)"]
     )
 
+    # Contadores de versão: incrementar no sucesso força reset completo do formulário
+    v_item = st.session_state.get("_v_item", 0)
+    v_busca = st.session_state.get("_v_busca", 0)
+
     # =========================================================================
     # ABA 1: REGISTRAR ITEM ENCONTRADO
     # =========================================================================
     with aba_item:
+        # Toast de sucesso exibido APÓS o rerun (evita ser apagado imediatamente)
+        if "_msg_item" in st.session_state:
+            st.toast(st.session_state.pop("_msg_item"), icon="✅")
 
         col_cat, col_cod = st.columns(2)
 
@@ -128,7 +179,7 @@ def mostrar_tela():
                 "Categoria *",
                 options=opcoes_categoria,
                 index=0,
-                key="cat_item",
+                key=f"cat_item_{v_item}",
             )
 
         categoria_valida = categoria_selecionada != "Selecione uma categoria..."
@@ -139,7 +190,7 @@ def mostrar_tela():
                     "Código do Item *",
                     options=["Selecione a categoria primeiro..."],
                     disabled=True,
-                    key="cod_placeholder",
+                    key=f"cod_placeholder_{v_item}",
                 )
                 codigo_selecionado = None
             else:
@@ -151,7 +202,7 @@ def mostrar_tela():
                         f"Código do Item * ({vagas_restantes} vagas livres)",
                         options=opcoes_codigo,
                         index=0,
-                        key="cod_item",
+                        key=f"cod_item_{v_item}",
                     )
                     codigo_selecionado = (
                         None if codigo_escolhido == "Selecione um código..."
@@ -167,22 +218,22 @@ def mostrar_tela():
 
         with col1:
             st.markdown('<p class="section-header">Dados do Item</p>', unsafe_allow_html=True)
-            descricao_input = st.text_input("Descrição detalhada *", key="desc_item")
-            local_input = st.text_input("Local onde foi achado", key="local_item")
+            descricao_input = st.text_input("Descrição detalhada *", key=f"desc_item_{v_item}")
+            local_input = st.text_input("Local onde foi achado", key=f"local_item_{v_item}")
             foto_input = st.file_uploader(
-                "Foto do item", type=["png", "jpg", "jpeg"], key="foto_item"
+                "Foto do item", type=["png", "jpg", "jpeg"], key=f"foto_item_{v_item}"
             )
             caixa_azul_input = st.checkbox(
                 "📦 Item está na Caixa Azul",
-                key="caixa_azul_item",
+                key=f"caixa_azul_item_{v_item}",
                 help="Marque se o item estiver fisicamente na Caixa Azul.",
             )
 
         with col2:
             st.markdown('<p class="section-header">Dados do Sócio (Opcional)</p>', unsafe_allow_html=True)
-            nome_socio = st.text_input("Nome no item/documento", key="nome_socio_item")
-            titulo_socio = st.text_input("Número do Título", key="titulo_socio_item")
-            telefone_socio = _campo_telefone("Telefone de Contato", key="tel_socio_item")
+            nome_socio = st.text_input("Nome no item/documento", key=f"nome_socio_item_{v_item}")
+            titulo_socio = _campo_titulo("Número do Título", key=f"titulo_socio_item_{v_item}")
+            telefone_socio = _campo_telefone("Telefone de Contato", key=f"tel_socio_item_{v_item}")
 
             socio_identificado = bool(nome_socio or titulo_socio or telefone_socio)
             contatado_input = None
@@ -192,11 +243,11 @@ def mostrar_tela():
                     options=["Sim", "Não"],
                     index=None,
                     horizontal=True,
-                    key="contatado_item",
+                    key=f"contatado_item_{v_item}",
                 )
 
         st.write("")
-        if st.button("Salvar Registro de Item", use_container_width=True, key="btn_salvar_item"):
+        if st.button("Salvar Registro de Item", use_container_width=True, key=f"btn_salvar_item_{v_item}"):
             erros = []
             if not categoria_valida:
                 erros.append("Selecione uma categoria.")
@@ -204,8 +255,10 @@ def mostrar_tela():
                 erros.append("Selecione um código de item.")
             if not descricao_input:
                 erros.append("Preencha a descrição do item.")
+            if titulo_socio and not _validar_titulo(titulo_socio):
+                erros.append("Título inválido. Use o formato 1234-10.")
             if telefone_socio and not _validar_telefone(telefone_socio):
-                erros.append("Telefone inválido. Digite DDD + 9 dígitos.")
+                erros.append("Telefone inválido. Use o padrão (21) 99999-9999.")
             if socio_identificado and contatado_input is None:
                 erros.append("Informe se o sócio já foi contatado.")
 
@@ -230,13 +283,8 @@ def mostrar_tela():
                 try:
                     supabase.table("itens").insert(dados_novo_item).execute()
                     _buscar_codigos_ocupados.clear()
-                    _limpar_estado([
-                        "cat_item", "cod_item", "cod_placeholder",
-                        "desc_item", "local_item", "foto_item", "caixa_azul_item",
-                        "nome_socio_item", "titulo_socio_item",
-                        "tel_socio_item", "contatado_item",
-                    ])
-                    st.toast(f"Item {codigo_selecionado} registrado com sucesso!", icon="✅")
+                    st.session_state["_msg_item"] = f"Item {codigo_selecionado} registrado com sucesso!"
+                    st.session_state["_v_item"] = v_item + 1
                     st.rerun()
                 except Exception as e:
                     st.toast("Erro ao salvar. Verifique os dados e tente novamente.", icon="❌")
@@ -246,15 +294,18 @@ def mostrar_tela():
     # ABA 2: REGISTRAR BUSCA ATIVA
     # =========================================================================
     with aba_dono:
+        if "_msg_busca" in st.session_state:
+            st.toast(st.session_state.pop("_msg_busca"), icon="✅")
+
         st.write("Abra um ticket para um sócio que está procurando um item perdido.")
 
         col_a, col_b = st.columns(2)
 
         with col_a:
             st.markdown('<p class="section-header">Dados do Sócio</p>', unsafe_allow_html=True)
-            nome_busca = st.text_input("Nome do Sócio *", key="nome_busca")
-            titulo_busca = st.text_input("Número do Título *", key="titulo_busca")
-            telefone_busca = _campo_telefone("Telefone *", key="tel_busca")
+            nome_busca = st.text_input("Nome do Sócio *", key=f"nome_busca_{v_busca}")
+            titulo_busca = _campo_titulo("Número do Título *", key=f"titulo_busca_{v_busca}")
+            telefone_busca = _campo_telefone("Telefone *", key=f"tel_busca_{v_busca}")
 
         with col_b:
             st.markdown('<p class="section-header">Dados do Item Perdido</p>', unsafe_allow_html=True)
@@ -263,10 +314,10 @@ def mostrar_tela():
                 "Categoria *",
                 options=opcoes_cat_busca,
                 index=0,
-                key="cat_busca",
+                key=f"cat_busca_{v_busca}",
             )
             descricao_busca = st.text_input(
-                "Descrição do que foi perdido *", key="desc_busca"
+                "Descrição do que foi perdido *", key=f"desc_busca_{v_busca}"
             )
             data_sla = (datetime.now() + timedelta(days=10)).strftime("%d/%m/%Y")
             st.text_input(
@@ -276,16 +327,18 @@ def mostrar_tela():
             )
 
         st.write("")
-        if st.button("Abrir Ticket de Busca", use_container_width=True, key="btn_salvar_busca"):
+        if st.button("Abrir Ticket de Busca", use_container_width=True, key=f"btn_salvar_busca_{v_busca}"):
             erros_busca = []
             if not nome_busca:
                 erros_busca.append("Preencha o nome do sócio.")
             if not titulo_busca:
                 erros_busca.append("Preencha o número do título.")
+            elif not _validar_titulo(titulo_busca):
+                erros_busca.append("Título inválido. Use o formato 1234-10.")
             if not telefone_busca:
                 erros_busca.append("Preencha o telefone.")
             elif not _validar_telefone(telefone_busca):
-                erros_busca.append("Telefone inválido. Digite DDD + 9 dígitos.")
+                erros_busca.append("Telefone inválido. Use o padrão (21) 99999-9999 — 11 dígitos.")
             if categoria_busca == "Selecione uma categoria...":
                 erros_busca.append("Selecione uma categoria.")
             if not descricao_busca:
@@ -308,11 +361,8 @@ def mostrar_tela():
                 }
                 try:
                     supabase.table("busca_ativa").insert(dados_busca).execute()
-                    _limpar_estado([
-                        "nome_busca", "titulo_busca", "tel_busca",
-                        "cat_busca", "desc_busca",
-                    ])
-                    st.toast("Ticket de busca ativa aberto com sucesso!", icon="✅")
+                    st.session_state["_msg_busca"] = "Ticket de busca ativa aberto com sucesso!"
+                    st.session_state["_v_busca"] = v_busca + 1
                     st.rerun()
                 except Exception as e:
                     st.toast("Erro ao abrir o ticket.", icon="❌")

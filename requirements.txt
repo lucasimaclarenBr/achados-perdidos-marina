@@ -3,3 +3,5 @@ pandas
 unidecode
 pillow
 supabase
+fpdf2
+openpyxl
