@@ -9,10 +9,10 @@ from infra.banco_dados import supabase
 # =============================================================================
 # CONSTANTES
 # =============================================================================
-STATUS_OPCOES = ["Ativo AeP", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"]
+STATUS_OPCOES = ["Armazenado", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"]
 
 TRANSICOES = {
-    "Ativo AeP":   ["Museu", "Devolvidos", "A Doar", "Descartados"],
+    "Armazenado":   ["Museu", "Devolvidos", "A Doar", "Descartados"],
     "Museu":       ["A Doar", "Descartados", "Devolvidos"],
     "A Doar":      ["Doados"],
     "Doados":      [],
@@ -43,7 +43,7 @@ PERFIS_EDICAO = {"Admin", "Edicao"}
 
 # Badges de cor por status (para exibição futura)
 COR_STATUS = {
-    "Ativo AeP":   "#16a34a",
+    "Armazenado":   "#16a34a",
     "Caixa Azul":  "#2563eb",
     "Museu":       "#d97706",
     "A Doar":      "#7c3aed",
@@ -109,7 +109,7 @@ def _enriquecer_df(df: pd.DataFrame) -> pd.DataFrame:
     df["dias_no_status"] = df.apply(_dias, axis=1)
 
     def _status_exib(row):
-        if row.get("caixa_azul") and row.get("status_atual") == "Ativo AeP":
+        if row.get("caixa_azul") and row.get("status_atual") == "Armazenado":
             return "Caixa Azul"
         return row.get("status_atual", "")
 
@@ -120,18 +120,24 @@ def _enriquecer_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
-    if filtros["categorias"]:
-        df = df[df["categoria"].isin(filtros["categorias"])]
-    if filtros["status"]:
-        df = df[df["status_exibicao"].isin(filtros["status"])]
-    if filtros["caixa_azul"]:
+    if filtros.get("categoria"):
+        df = df[df["categoria"] == filtros["categoria"]]
+    if filtros.get("status"):
+        df = df[df["status_exibicao"] == filtros["status"]]
+    if filtros.get("caixa_azul"):
         df = df[df["caixa_azul"] == True]
-    if filtros["data_ini"] and filtros["data_fim"]:
+
+    # Datas personalizado tem prioridade sobre filtro de dias
+    datas = filtros.get("datas", ())
+    if isinstance(datas, (tuple, list)) and len(datas) == 2:
         df = df[
-            (df["data_cadastro"].dt.date >= filtros["data_ini"]) &
-            (df["data_cadastro"].dt.date <= filtros["data_fim"])
+            (df["data_cadastro"].dt.date >= datas[0]) &
+            (df["data_cadastro"].dt.date <= datas[1])
         ]
-    if filtros["texto"]:
+    elif filtros.get("dias"):
+        df = df[df["dias_no_status"] <= filtros["dias"]]
+
+    if filtros.get("texto"):
         t = filtros["texto"].lower()
         df = df[
             df["descricao"].str.lower().str.contains(t, na=False) |
@@ -266,7 +272,7 @@ def _exportar_pdf(df: pd.DataFrame) -> bytes | None:
 def _dialog_item(item: dict, perfil: str, usuario: str):
     pode_editar = perfil in PERFIS_EDICAO
     cod = item["codigo_item"]
-    status_atual = item.get("status_atual", "Ativo AeP")
+    status_atual = item.get("status_atual", "Armazenado")
 
     col_foto, col_dados = st.columns([1, 2])
 
@@ -313,7 +319,7 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
             novo_status = "Manter atual"
 
         nova_caixa_azul = item.get("caixa_azul", False)
-        if status_atual == "Ativo AeP":
+        if status_atual == "Armazenado":
             nova_caixa_azul = st.checkbox("Caixa Azul", value=nova_caixa_azul, key=f"ed_caixa_{cod}")
 
         st.markdown("---")
@@ -454,7 +460,7 @@ def _dialog_lote(codigos: list, perfil: str, usuario: str):
 # =============================================================================
 
 def mostrar_tela():
-    st.title("Inventário — Achados e Perdidos")
+    st.title("Pesquisa de Item — Achados e Perdidos")
 
     perfil = st.session_state.get("perfil", "Consulta")
     usuario = st.session_state.get("login", "")
@@ -467,27 +473,83 @@ def mostrar_tela():
 
     # ── Filtros ──
     with st.expander("🔍  Filtros", expanded=True):
-        fc1, fc2, fc3, fc4 = st.columns([2, 2, 1, 2])
-        with fc1:
-            f_cat = st.multiselect("Categoria", options=CATEGORIAS, key="f_cat")
-        with fc2:
-            f_status = st.multiselect("Status", options=[
-                "Ativo AeP", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"
-            ], key="f_status")
-        with fc3:
-            f_caixa = st.checkbox("Caixa Azul", key="f_caixa")
-        with fc4:
-            f_texto = st.text_input("Buscar (código, descrição, sócio)", key="f_texto")
 
-        fc5, fc6 = st.columns(2)
-        with fc5:
-            f_data_ini = st.date_input("Cadastrado a partir de", value=None, key="f_data_ini")
-        with fc6:
-            f_data_fim = st.date_input("Cadastrado até", value=None, key="f_data_fim")
+        def _ao_marcar_7d():
+            st.session_state["f_14d"] = False
+            st.session_state["f_28d"] = False
+            st.session_state["f_datas"] = ()
+
+        def _ao_marcar_14d():
+            st.session_state["f_7d"] = False
+            st.session_state["f_28d"] = False
+            st.session_state["f_datas"] = ()
+
+        def _ao_marcar_28d():
+            st.session_state["f_7d"] = False
+            st.session_state["f_14d"] = False
+            st.session_state["f_datas"] = ()
+
+        def _ao_alterar_datas():
+            val = st.session_state.get("f_datas", ())
+            if isinstance(val, (tuple, list)) and len(val) == 2:
+                st.session_state["f_7d"] = False
+                st.session_state["f_14d"] = False
+                st.session_state["f_28d"] = False
+
+        col_esq, col_ctr, col_dir = st.columns([4, 1, 3])
+
+        with col_esq:
+            f_texto = st.text_input(
+                "Buscar (código, descrição, sócio)",
+                placeholder="Digite aqui...",
+                key="f_texto",
+            )
+            st.markdown("Contagem de Dias (Opcional)")
+            cd1, cd2, cd3, cd4 = st.columns([1, 1, 1, 2])
+            with cd1:
+                f_7d = st.checkbox("7 Dias", key="f_7d", on_change=_ao_marcar_7d)
+            with cd2:
+                f_14d = st.checkbox("14 Dias", key="f_14d", on_change=_ao_marcar_14d)
+            with cd3:
+                f_28d = st.checkbox("28 Dias", key="f_28d", on_change=_ao_marcar_28d)
+            with cd4:
+                f_datas = st.date_input(
+                    "Personalizado",
+                    value=(),
+                    key="f_datas",
+                    on_change=_ao_alterar_datas,
+                    label_visibility="collapsed",
+                )
+
+        with col_ctr:
+            st.markdown('<div style="height: 1.65rem"></div>', unsafe_allow_html=True)
+            f_caixa = st.checkbox("Caixa Azul", key="f_caixa")
+
+        with col_dir:
+            f_cat = st.selectbox(
+                "Categoria (Opcional)",
+                options=CATEGORIAS,
+                index=None,
+                placeholder="Selecione a categoria",
+                key="f_cat",
+            )
+            f_status = st.selectbox(
+                "Status (Opcional)",
+                options=["Armazenado", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"],
+                index=None,
+                placeholder="Selecione o status",
+                key="f_status",
+            )
+
+    dias_filtro = 7 if f_7d else (14 if f_14d else (28 if f_28d else None))
 
     df_filtrado = _aplicar_filtros(df.copy(), {
-        "categorias": f_cat, "status": f_status, "caixa_azul": f_caixa,
-        "texto": f_texto, "data_ini": f_data_ini, "data_fim": f_data_fim,
+        "categoria": f_cat,
+        "status": f_status,
+        "caixa_azul": f_caixa,
+        "texto": f_texto,
+        "dias": dias_filtro,
+        "datas": f_datas,
     })
 
     st.caption(f"{len(df_filtrado)} item(ns) encontrado(s)")
@@ -502,6 +564,7 @@ def mostrar_tela():
     ].copy()
     df_editor.columns = ["Código", "Categoria", "Descrição", "Status", "Dias"]
     df_editor.insert(0, "✓", False)
+    df_editor["Ação"] = "✏️"
 
     resultado = st.data_editor(
         df_editor,
@@ -514,7 +577,9 @@ def mostrar_tela():
             "Descrição": st.column_config.TextColumn("Descrição", width="large"),
             "Status":    st.column_config.TextColumn("Status", width="medium"),
             "Dias":      st.column_config.NumberColumn("Dias", width="small"),
+            "Ação":      st.column_config.TextColumn("Ação", width="small"),
         },
+        disabled=["Código", "Categoria", "Descrição", "Status", "Dias", "Ação"],
         key="tabela_itens",
     )
 
@@ -522,24 +587,9 @@ def mostrar_tela():
         resultado[resultado["✓"] == True].index.tolist()
     ].tolist()
 
-    # ── Detalhe por item ──
-    st.markdown("---")
-    col_sel, col_ver = st.columns([3, 1])
-    with col_sel:
-        item_sel = st.selectbox(
-            "Selecionar item para ver detalhes / editar",
-            options=["—"] + df_filtrado["codigo_item"].tolist(),
-            key="sel_item_detalhe",
-            label_visibility="collapsed",
-        )
-    with col_ver:
-        if st.button("Ver / Editar", use_container_width=True, key="btn_ver_item", disabled=(item_sel == "—")):
-            row_sel = df_filtrado[df_filtrado["codigo_item"] == item_sel].iloc[0]
-            _dialog_item(row_sel.to_dict(), perfil, usuario)
-
     # ── Ações em lote e exportação ──
     st.markdown("---")
-    col_lote, col_exp1, col_exp2, col_exp3, col_exp4 = st.columns([2, 1, 1, 1, 1])
+    col_lote, col_exp_excel, col_exp_pdf = st.columns([3, 1, 1])
 
     with col_lote:
         if perfil in PERFIS_EDICAO:
@@ -551,61 +601,56 @@ def mostrar_tela():
             ):
                 _dialog_lote(selecionados, perfil, usuario)
 
-    with col_exp1:
-        excel_tudo = _exportar_excel(df_filtrado)
-        st.download_button(
-            "⬇ Excel (tudo)",
-            data=excel_tudo,
-            file_name=f"inventario_{date.today().isoformat()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            key="btn_exp_excel_tudo",
-        )
+    df_sel = (
+        df_filtrado[df_filtrado["codigo_item"].isin(selecionados)]
+        if selecionados
+        else pd.DataFrame(columns=COLUNAS_EXPORT)
+    )
 
-    with col_exp2:
-        pdf_tudo = _exportar_pdf(df_filtrado)
-        if pdf_tudo:
+    with col_exp_excel:
+        with st.popover("⬇ Exportar para Excel", use_container_width=True):
             st.download_button(
-                "⬇ PDF (tudo)",
-                data=pdf_tudo,
-                file_name=f"inventario_{date.today().isoformat()}.pdf",
-                mime="application/pdf",
+                "Exportar tudo",
+                data=_exportar_excel(df_filtrado),
+                file_name=f"inventario_{date.today().isoformat()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                key="btn_exp_pdf_tudo",
+                key="btn_exp_excel_tudo",
             )
-        else:
-            st.button("⬇ PDF (tudo)", disabled=True, use_container_width=True, key="btn_pdf_tudo_dis",
-                      help="Instale fpdf2 para habilitar exportação PDF")
-
-    with col_exp3:
-        if selecionados:
-            df_sel = df_filtrado[df_filtrado["codigo_item"].isin(selecionados)]
-            excel_sel = _exportar_excel(df_sel)
+            label_sel = f"Exportar seleção ({len(selecionados)})" if selecionados else "Exportar seleção"
             st.download_button(
-                f"⬇ Excel ({len(selecionados)})",
-                data=excel_sel,
-                file_name=f"selecionados_{date.today().isoformat()}.xlsx",
+                label_sel,
+                data=_exportar_excel(df_sel),
+                file_name=f"selecao_{date.today().isoformat()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="btn_exp_excel_sel",
             )
-        else:
-            st.button("⬇ Excel (sel.)", disabled=True, use_container_width=True, key="btn_excel_sel_dis")
 
-    with col_exp4:
-        if selecionados:
-            df_sel = df_filtrado[df_filtrado["codigo_item"].isin(selecionados)]
+    with col_exp_pdf:
+        with st.popover("⬇ Exportar para PDF", use_container_width=True):
+            pdf_tudo = _exportar_pdf(df_filtrado)
+            if pdf_tudo:
+                st.download_button(
+                    "Exportar tudo",
+                    data=pdf_tudo,
+                    file_name=f"inventario_{date.today().isoformat()}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="btn_exp_pdf_tudo",
+                )
+            else:
+                st.caption("Instale fpdf2 para habilitar PDF.")
             pdf_sel = _exportar_pdf(df_sel)
             if pdf_sel:
+                label_sel_pdf = f"Exportar seleção ({len(selecionados)})" if selecionados else "Exportar seleção"
                 st.download_button(
-                    f"⬇ PDF ({len(selecionados)})",
+                    label_sel_pdf,
                     data=pdf_sel,
-                    file_name=f"selecionados_{date.today().isoformat()}.pdf",
+                    file_name=f"selecao_{date.today().isoformat()}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                     key="btn_exp_pdf_sel",
                 )
             else:
-                st.button("⬇ PDF (sel.)", disabled=True, use_container_width=True, key="btn_pdf_sel_dis")
-        else:
-            st.button("⬇ PDF (sel.)", disabled=True, use_container_width=True, key="btn_pdf_sel_dis2")
+                st.caption("Instale fpdf2 para habilitar PDF.")

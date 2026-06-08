@@ -14,7 +14,7 @@ st.markdown("""
 /* ── Margens ── */
 .block-container {
     padding-top: 1rem !important;
-    padding-bottom: 0rem !important;
+    padding-bottom: 2rem !important;
 }
 [data-testid="InputInstructions"] { display: none; }
 hr {
@@ -35,10 +35,15 @@ section[data-testid="stSidebar"] p {
 section[data-testid="stSidebar"] hr {
     border-color: rgba(255,255,255,0.1) !important;
 }
-section[data-testid="stSidebar"] button {
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
     background-color: transparent !important;
     border: 1px solid rgba(255,255,255,0.2) !important;
     color: #c8d3e8 !important;
+}
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+    background-color: #cc0000 !important;
+    border-color: #cc0000 !important;
+    color: #ffffff !important;
 }
 section[data-testid="stSidebar"] button:hover {
     background-color: #cc0000 !important;
@@ -193,8 +198,8 @@ else:
     elif menu == "Registrar Item":
         tela_cadastro.mostrar_tela()
     elif menu == "Dashboard":
-        st.title("📊 Dashboard")
+        st.title("Dashboard")
         st.info("Módulo de indicadores em desenvolvimento.")
     elif menu == "Configurações":
-        st.title("⚙️ Configurações")
+        st.title("Configurações")
         st.info("Módulo de administração de usuários em desenvolvimento.")

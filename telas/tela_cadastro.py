@@ -110,7 +110,6 @@ def _campo_telefone(label: str, key: str) -> str:
         key=key,
         on_change=_ao_alterar,
         placeholder="(21) 99999-9999",
-        help="Formato: (DDD) 9XXXX-XXXX — 11 dígitos no total",
     )
     if valor:
         digitos = len(re.sub(r"\D", "", valor))
@@ -127,6 +126,13 @@ def _campo_telefone(label: str, key: str) -> str:
     return valor
 
 
+def _campo_descricao(label: str, key: str) -> str:
+    def _ao_alterar():
+        st.session_state[key] = st.session_state[key].upper()
+
+    return st.text_input(label, key=key, on_change=_ao_alterar)
+
+
 def _campo_titulo(label: str, key: str) -> str:
     def _ao_alterar():
         st.session_state[key] = _formatar_titulo(st.session_state[key])
@@ -136,7 +142,6 @@ def _campo_titulo(label: str, key: str) -> str:
         key=key,
         on_change=_ao_alterar,
         placeholder="1234-10",
-        help="Formato: 4 dígitos, hífen, 2 dígitos — ex.: 1234-10",
     )
     if valor:
         digitos = len(re.sub(r"\D", "", valor))
@@ -218,20 +223,19 @@ def mostrar_tela():
 
         with col1:
             st.markdown('<p class="section-header">Dados do Item</p>', unsafe_allow_html=True)
-            descricao_input = st.text_input("Descrição detalhada *", key=f"desc_item_{v_item}")
-            local_input = st.text_input("Local onde foi achado", key=f"local_item_{v_item}")
+            descricao_input = _campo_descricao("Descrição detalhada *", key=f"desc_item_{v_item}")
+            local_input = _campo_descricao("Local onde foi achado", key=f"local_item_{v_item}")
             foto_input = st.file_uploader(
                 "Foto do item", type=["png", "jpg", "jpeg"], key=f"foto_item_{v_item}"
             )
             caixa_azul_input = st.checkbox(
                 "📦 Item está na Caixa Azul",
                 key=f"caixa_azul_item_{v_item}",
-                help="Marque se o item estiver fisicamente na Caixa Azul.",
             )
 
         with col2:
             st.markdown('<p class="section-header">Dados do Sócio (Opcional)</p>', unsafe_allow_html=True)
-            nome_socio = st.text_input("Nome no item/documento", key=f"nome_socio_item_{v_item}")
+            nome_socio = _campo_descricao("Nome no item", key=f"nome_socio_item_{v_item}")
             titulo_socio = _campo_titulo("Número do Título", key=f"titulo_socio_item_{v_item}")
             telefone_socio = _campo_telefone("Telefone de Contato", key=f"tel_socio_item_{v_item}")
 
@@ -277,7 +281,7 @@ def mostrar_tela():
                     "titulo_socio": titulo_socio,
                     "telefone_socio": telefone_socio,
                     "contatado": contatado_input == "Sim",
-                    "status_atual": "Ativo AeP",
+                    "status_atual": "Armazenado",
                     "foto_url": url_foto,
                 }
                 try:
@@ -303,7 +307,7 @@ def mostrar_tela():
 
         with col_a:
             st.markdown('<p class="section-header">Dados do Sócio</p>', unsafe_allow_html=True)
-            nome_busca = st.text_input("Nome do Sócio *", key=f"nome_busca_{v_busca}")
+            nome_busca = _campo_descricao("Nome do Sócio *", key=f"nome_busca_{v_busca}")
             titulo_busca = _campo_titulo("Número do Título *", key=f"titulo_busca_{v_busca}")
             telefone_busca = _campo_telefone("Telefone *", key=f"tel_busca_{v_busca}")
 
@@ -316,7 +320,7 @@ def mostrar_tela():
                 index=0,
                 key=f"cat_busca_{v_busca}",
             )
-            descricao_busca = st.text_input(
+            descricao_busca = _campo_descricao(
                 "Descrição do que foi perdido *", key=f"desc_busca_{v_busca}"
             )
             data_sla = (datetime.now() + timedelta(days=10)).strftime("%d/%m/%Y")
