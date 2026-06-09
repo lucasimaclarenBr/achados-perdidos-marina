@@ -504,7 +504,7 @@ def mostrar_tela():
                 placeholder="Digite aqui...",
                 key="f_texto",
             )
-            st.markdown("Contagem de Dias (Opcional)")
+            st.markdown('<label style="font-size:0.875rem; font-weight:400; color:#fafafa">Contagem de Dias (Opcional)</label>', unsafe_allow_html=True)
             cd1, cd2, cd3, cd4 = st.columns([1, 1, 1, 2])
             with cd1:
                 f_7d = st.checkbox("7 Dias", key="f_7d", on_change=_ao_marcar_7d)
@@ -564,7 +564,6 @@ def mostrar_tela():
     ].copy()
     df_editor.columns = ["Código", "Categoria", "Descrição", "Status", "Dias"]
     df_editor.insert(0, "✓", False)
-    df_editor["Ação"] = "✏️"
 
     resultado = st.data_editor(
         df_editor,
@@ -577,9 +576,8 @@ def mostrar_tela():
             "Descrição": st.column_config.TextColumn("Descrição", width="large"),
             "Status":    st.column_config.TextColumn("Status", width="medium"),
             "Dias":      st.column_config.NumberColumn("Dias", width="small"),
-            "Ação":      st.column_config.TextColumn("Ação", width="small"),
         },
-        disabled=["Código", "Categoria", "Descrição", "Status", "Dias", "Ação"],
+        disabled=["Código", "Categoria", "Descrição", "Status", "Dias"],
         key="tabela_itens",
     )
 
@@ -589,17 +587,30 @@ def mostrar_tela():
 
     # ── Ações em lote e exportação ──
     st.markdown("---")
-    col_lote, col_exp_excel, col_exp_pdf = st.columns([3, 1, 1])
+    col_lote, col_editar, col_exp_excel, col_exp_pdf = st.columns([2, 1, 1, 1])
 
     with col_lote:
         if perfil in PERFIS_EDICAO:
             if st.button(
-                f"Movimentar selecionados ({len(selecionados)})" if selecionados else "Movimentar selecionados",
+                f"Movimentar ({len(selecionados)})" if selecionados else "Movimentar selecionados",
                 disabled=len(selecionados) == 0,
                 use_container_width=True,
+                help="Selecione um ou mais itens",
                 key="btn_lote",
             ):
                 _dialog_lote(selecionados, perfil, usuario)
+
+    with col_editar:
+        if perfil in PERFIS_EDICAO:
+            if st.button(
+                "Editar",
+                disabled=len(selecionados) != 1,
+                use_container_width=True,
+                help="Selecione um item",
+                key="btn_editar",
+            ):
+                row_sel = df_filtrado[df_filtrado["codigo_item"] == selecionados[0]].iloc[0]
+                _dialog_item(row_sel.to_dict(), perfil, usuario)
 
     df_sel = (
         df_filtrado[df_filtrado["codigo_item"].isin(selecionados)]
