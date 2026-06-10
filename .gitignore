@@ -1,3 +1,4 @@
 .streamlit/
 PROXIMAS_TELAS.txt
+.venv/
 venv/
