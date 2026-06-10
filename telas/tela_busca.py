@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 from infra.banco_dados import supabase
-
+from infra.utils import agora_brt, hoje_brt, formatar_dt_brt
 
 # =============================================================================
 # CONSTANTES
@@ -90,7 +90,7 @@ def _enriquecer_df(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     datas_status = _carregar_datas_ultimo_status()
-    hoje = date.today()
+    hoje = hoje_brt()
 
     def _dias(row):
         cod = row["codigo_item"]
@@ -127,7 +127,6 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     if filtros.get("caixa_azul"):
         df = df[df["caixa_azul"] == True]
 
-    # Datas personalizado tem prioridade sobre filtro de dias
     datas = filtros.get("datas", ())
     if isinstance(datas, (tuple, list)) and len(datas) == 2:
         df = df[
@@ -138,11 +137,12 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         df = df[df["dias_no_status"] <= filtros["dias"]]
 
     if filtros.get("texto"):
-        t = filtros["texto"].lower()
+        from unidecode import unidecode
+        t = unidecode(filtros["texto"].lower())
         df = df[
-            df["descricao"].str.lower().str.contains(t, na=False) |
-            df["codigo_item"].str.lower().str.contains(t, na=False) |
-            df["nome_socio_identificado"].fillna("").str.lower().str.contains(t, na=False)
+            df["descricao"].fillna("").apply(lambda x: unidecode(x.lower())).str.contains(t, na=False) |
+            df["codigo_item"].fillna("").apply(lambda x: unidecode(x.lower())).str.contains(t, na=False) |
+            df["nome_socio_identificado"].fillna("").apply(lambda x: unidecode(x.lower())).str.contains(t, na=False)
         ]
     return df
 
@@ -258,7 +258,7 @@ def _exportar_pdf(df: pd.DataFrame) -> bytes | None:
     pdf.set_y(-15)
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(150, 150, 150)
-    rodape = _sanitizar_pdf(f"Marina Barra Clube - Achados e Perdidos - Gerado em {date.today().strftime('%d/%m/%Y')}")
+    rodape = _sanitizar_pdf(f"Marina Barra Clube - Achados e Perdidos - Gerado em {hoje_brt().strftime('%d/%m/%Y')}")
     pdf.cell(0, 10, rodape, align="C")
 
     return bytes(pdf.output())
@@ -270,6 +270,8 @@ def _exportar_pdf(df: pd.DataFrame) -> bytes | None:
 
 @st.dialog("Detalhes e Edição do Item", width="large")
 def _dialog_item(item: dict, perfil: str, usuario: str):
+    from telas.tela_cadastro import _formatar_telefone, _formatar_titulo, _validar_telefone, _validar_titulo
+
     pode_editar = perfil in PERFIS_EDICAO
     cod = item["codigo_item"]
     status_atual = item.get("status_atual", "Armazenado")
@@ -290,115 +292,174 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
         st.markdown(f"**Categoria:** {item.get('categoria', '')}")
         st.markdown(f"**Cadastrado:** {item.get('data_cadastro_fmt', '')}")
         st.markdown(f"**Dias no status:** {item.get('dias_no_status', 0)}")
+        st.markdown(f"**Status atual:** {item.get('status_exibicao', status_atual)}")
 
     with col_dados:
         if not pode_editar:
             st.markdown(f"**Descrição:** {item.get('descricao', '')}")
             st.markdown(f"**Local:** {item.get('local_achado', '') or '—'}")
-            st.markdown(f"**Status:** {item.get('status_exibicao', '')}")
             st.markdown(f"**Caixa Azul:** {'Sim' if item.get('caixa_azul') else 'Não'}")
             st.markdown("---")
             st.markdown(f"**Sócio:** {item.get('nome_socio_identificado', '') or '—'}")
             st.markdown(f"**Título:** {item.get('titulo_socio', '') or '—'}")
             st.markdown(f"**Telefone:** {item.get('telefone_socio', '') or '—'}")
             st.markdown(f"**Contatado:** {'Sim' if item.get('contatado') else 'Não'}")
-            return
-
-        nova_descricao = st.text_input("Descrição", value=item.get("descricao", ""), key=f"ed_desc_{cod}")
-        novo_local = st.text_input("Local onde foi achado", value=item.get("local_achado") or "", key=f"ed_local_{cod}")
-
-        opcoes_transicao = TRANSICOES.get(status_atual, [])
-        if opcoes_transicao:
-            novo_status = st.selectbox(
-                f"Status atual: **{item.get('status_exibicao', status_atual)}** → Mover para",
-                options=["Manter atual"] + opcoes_transicao,
-                key=f"ed_status_{cod}",
-            )
         else:
-            st.markdown(f"**Status:** {item.get('status_exibicao', '')} *(status final)*")
-            novo_status = "Manter atual"
+            def _upper_desc():
+                st.session_state[f"ed_desc_{cod}"] = st.session_state[f"ed_desc_{cod}"].upper()
 
-        nova_caixa_azul = item.get("caixa_azul", False)
-        if status_atual == "Armazenado":
-            nova_caixa_azul = st.checkbox("Caixa Azul", value=nova_caixa_azul, key=f"ed_caixa_{cod}")
+            def _upper_local():
+                st.session_state[f"ed_local_{cod}"] = st.session_state[f"ed_local_{cod}"].upper()
 
-        st.markdown("---")
-        st.markdown('<p class="section-header">Dados do Sócio</p>', unsafe_allow_html=True)
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            novo_nome_socio = st.text_input("Nome", value=item.get("nome_socio_identificado") or "", key=f"ed_nome_s_{cod}")
-            novo_titulo = st.text_input("Título", value=item.get("titulo_socio") or "", key=f"ed_titulo_{cod}")
-        with sc2:
-            novo_tel = st.text_input("Telefone", value=item.get("telefone_socio") or "", key=f"ed_tel_{cod}")
-            novo_contatado = st.checkbox("Sócio contatado", value=bool(item.get("contatado")), key=f"ed_cont_{cod}")
+            nova_descricao = st.text_input(
+                "Descrição",
+                value=item.get("descricao", ""),
+                key=f"ed_desc_{cod}",
+                on_change=_upper_desc,
+            )
+            novo_local = st.text_input(
+                "Local onde foi achado",
+                value=item.get("local_achado") or "",
+                key=f"ed_local_{cod}",
+                on_change=_upper_local,
+            )
+
+            st.markdown("---")
+            st.markdown('<p class="section-header">Dados do Sócio</p>', unsafe_allow_html=True)
+            sc1, sc2 = st.columns(2)
+
+            with sc1:
+                def _upper_nome():
+                    st.session_state[f"ed_nome_s_{cod}"] = st.session_state[f"ed_nome_s_{cod}"].upper()
+
+                novo_nome_socio = st.text_input(
+                    "Nome",
+                    value=item.get("nome_socio_identificado") or "",
+                    key=f"ed_nome_s_{cod}",
+                    on_change=_upper_nome,
+                )
+
+                def _fmt_titulo():
+                    st.session_state[f"ed_titulo_{cod}"] = _formatar_titulo(st.session_state[f"ed_titulo_{cod}"])
+
+                novo_titulo = st.text_input(
+                    "Título",
+                    value=item.get("titulo_socio") or "",
+                    key=f"ed_titulo_{cod}",
+                    on_change=_fmt_titulo,
+                    placeholder="1234-10",
+                )
+                if novo_titulo and not _validar_titulo(novo_titulo):
+                    digitos = len(re.sub(r"\D", "", novo_titulo))
+                    if digitos > 6:
+                        st.caption(f"⚠️ Título muito longo ({digitos} dígitos). Use o padrão 1234-10.")
+                    else:
+                        st.caption(f"⚠️ Título incompleto ({digitos} dígitos). Use o padrão 1234-10.")
+
+            with sc2:
+                def _fmt_tel():
+                    st.session_state[f"ed_tel_{cod}"] = _formatar_telefone(st.session_state[f"ed_tel_{cod}"])
+
+                novo_tel = st.text_input(
+                    "Telefone",
+                    value=item.get("telefone_socio") or "",
+                    key=f"ed_tel_{cod}",
+                    on_change=_fmt_tel,
+                    placeholder="(21) 99999-9999",
+                )
+                if novo_tel:
+                    digitos = len(re.sub(r"\D", "", novo_tel))
+                    if digitos > 0 and digitos != 11:
+                        st.caption(f"⚠️ Número inválido ({digitos} dígitos). Use DDD + 9 dígitos.")
+
+                novo_contatado = st.checkbox(
+                    "Sócio contatado",
+                    value=bool(item.get("contatado")),
+                    key=f"ed_cont_{cod}",
+                )
+
+    # ── Histórico de movimentação ──
+    st.markdown("---")
+    st.markdown('<p class="section-header">Histórico de Edições</p>', unsafe_allow_html=True)
+    try:
+        resp_hist = (
+                    supabase.table("historico_edicoes")
+                    .select("campo_alterado, valor_antigo, valor_novo, data_hora_alteracao, usuario_editor")
+                    .eq("codigo_item", cod)
+                    .order("data_hora_alteracao", desc=True)
+                    .execute()
+                )
+        if resp_hist.data:
+            for h in resp_hist.data:
+                dt = formatar_dt_brt(h["data_hora_alteracao"])
+                st.caption(f"🔄 {h['valor_antigo']} → **{h['valor_novo']}** — {dt} por *{h['usuario_editor']}*")
+        else:
+            st.caption("Nenhuma movimentação registrada.")
+    except Exception as e:
+        st.caption(f"Erro ao carregar histórico: {e}")
+
+    if not pode_editar:
+        return
 
     st.markdown("---")
-    senha_conf = st.text_input("Senha para confirmar alterações", type="password", key=f"ed_senha_{cod}")
+    senha_conf = st.text_input(
+        "Senha para confirmar alterações",
+        type="password",
+        key=f"ed_senha_{cod}",
+    )
 
     col_s, col_c = st.columns(2)
     with col_s:
-        if st.button("Salvar alterações", use_container_width=True, key=f"ed_salvar_{cod}"):
-            if not senha_conf:
-                st.toast("Digite sua senha para confirmar.", icon="⚠️")
-                return
-            try:
-                resp = supabase.table("usuarios").select("senha").eq("login", usuario).execute()
-                if not resp.data or resp.data[0]["senha"] != senha_conf:
-                    st.toast("Senha incorreta.", icon="❌")
-                    return
-            except Exception as e:
-                st.toast(f"Erro ao validar senha: {e}", icon="❌")
-                return
-
-            atualizacoes = {}
-            historico = []
-            agora = datetime.utcnow().isoformat()
-
-            campos = [
-                ("descricao", item.get("descricao", ""), nova_descricao),
-                ("local_achado", item.get("local_achado") or "", novo_local),
-                ("nome_socio_identificado", item.get("nome_socio_identificado") or "", novo_nome_socio),
-                ("titulo_socio", item.get("titulo_socio") or "", novo_titulo),
-                ("telefone_socio", item.get("telefone_socio") or "", novo_tel),
-                ("contatado", bool(item.get("contatado")), novo_contatado),
-                ("caixa_azul", item.get("caixa_azul", False), nova_caixa_azul),
-            ]
-            for campo, antigo, novo in campos:
-                if novo != antigo:
-                    atualizacoes[campo] = novo
-                    historico.append({
-                        "codigo_item": cod, "campo_alterado": campo,
-                        "valor_antigo": str(antigo), "valor_novo": str(novo),
-                        "data_hora_alteracao": agora, "usuario_editor": usuario,
-                    })
-
-            if novo_status != "Manter atual":
-                atualizacoes["status_atual"] = novo_status
-                historico.append({
-                    "codigo_item": cod, "campo_alterado": "status_atual",
-                    "valor_antigo": status_atual, "valor_novo": novo_status,
-                    "data_hora_alteracao": agora, "usuario_editor": usuario,
-                })
-
-            if not atualizacoes:
-                st.toast("Nenhuma alteração detectada.", icon="ℹ️")
-                return
-
-            try:
-                supabase.table("itens").update(atualizacoes).eq("codigo_item", cod).execute()
-                if historico:
-                    supabase.table("historico_edicoes").insert(historico).execute()
-                _carregar_itens.clear()
-                _carregar_datas_ultimo_status.clear()
-                st.toast(f"Item {cod} atualizado!", icon="✅")
-                st.rerun()
-            except Exception as e:
-                st.toast(f"Erro ao salvar: {e}", icon="❌")
-
+        salvar_clicado = st.button("Salvar alterações", use_container_width=True, key=f"ed_salvar_{cod}")
     with col_c:
         if st.button("Descartar", use_container_width=True, key=f"ed_cancelar_{cod}"):
             st.rerun()
 
+    if salvar_clicado:
+        if not senha_conf:
+            st.toast("Digite sua senha para confirmar.", icon="⚠️")
+        else:
+            try:
+                resp = supabase.table("usuarios").select("senha").eq("login", usuario).execute()
+                if not resp.data or resp.data[0]["senha"] != senha_conf:
+                    st.toast("Senha incorreta.", icon="❌")
+                else:
+                    atualizacoes = {}
+                    historico = []
+                    agora = agora_brt().isoformat()
+
+                    campos = [
+                        ("descricao", item.get("descricao", ""), nova_descricao),
+                        ("local_achado", item.get("local_achado") or "", novo_local),
+                        ("nome_socio_identificado", item.get("nome_socio_identificado") or "", novo_nome_socio),
+                        ("titulo_socio", item.get("titulo_socio") or "", novo_titulo),
+                        ("telefone_socio", item.get("telefone_socio") or "", novo_tel),
+                        ("contatado", bool(item.get("contatado")), novo_contatado),
+                    ]
+                    for campo, antigo, novo in campos:
+                        if novo != antigo:
+                            atualizacoes[campo] = novo
+                            historico.append({
+                                "codigo_item": cod, "campo_alterado": campo,
+                                "valor_antigo": str(antigo), "valor_novo": str(novo),
+                                "data_hora_alteracao": agora, "usuario_editor": usuario,
+                            })
+
+                    if not atualizacoes:
+                        st.toast("Nenhuma alteração detectada.", icon="ℹ️")
+                    else:
+                        try:
+                            supabase.table("itens").update(atualizacoes).eq("codigo_item", cod).execute()
+                            if historico:
+                                supabase.table("historico_edicoes").insert(historico).execute()
+                            _carregar_itens.clear()
+                            _carregar_datas_ultimo_status.clear()
+                            st.toast(f"Item {cod} atualizado!", icon="✅")
+                            st.rerun()
+                        except Exception as e:
+                            st.toast(f"Erro ao salvar: {e}", icon="❌")
+            except Exception as e:
+                st.toast(f"Erro ao validar senha: {e}", icon="❌")
 
 # =============================================================================
 # DIALOG MOVIMENTAÇÃO EM LOTE
@@ -432,7 +493,7 @@ def _dialog_lote(codigos: list, perfil: str, usuario: str):
             st.toast(f"Erro: {e}", icon="❌")
             return
 
-        agora = datetime.utcnow().isoformat()
+        agora = agora_brt().isoformat()
         df_atual = _carregar_itens()
         historico = []
         try:
@@ -522,7 +583,8 @@ def mostrar_tela():
                 )
 
         with col_ctr:
-            st.markdown('<div style="height: 1.65rem"></div>', unsafe_allow_html=True)
+            st.markdown('<div style="height: 1.2rem"></div>', unsafe_allow_html=True)
+            st.markdown('<style>div[data-testid="stCheckbox"] label { padding-left: 1rem; }</style>', unsafe_allow_html=True)
             f_caixa = st.checkbox("Caixa Azul", key="f_caixa")
 
         with col_dir:
@@ -581,9 +643,9 @@ def mostrar_tela():
         key="tabela_itens",
     )
 
-    selecionados = df_filtrado["codigo_item"].iloc[
-        resultado[resultado["✓"] == True].index.tolist()
-    ].tolist()
+    indices_marcados = resultado.reset_index(drop=True)
+    indices_marcados = indices_marcados[indices_marcados["✓"] == True].index.tolist()
+    selecionados = df_filtrado["codigo_item"].reset_index(drop=True).iloc[indices_marcados].tolist()
 
     # ── Ações em lote e exportação ──
     st.markdown("---")
@@ -623,7 +685,7 @@ def mostrar_tela():
             st.download_button(
                 "Exportar tudo",
                 data=_exportar_excel(df_filtrado),
-                file_name=f"inventario_{date.today().isoformat()}.xlsx",
+                file_name=f"inventario_{hoje_brt().isoformat()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="btn_exp_excel_tudo",
@@ -632,7 +694,7 @@ def mostrar_tela():
             st.download_button(
                 label_sel,
                 data=_exportar_excel(df_sel),
-                file_name=f"selecao_{date.today().isoformat()}.xlsx",
+                file_name=f"selecao_{hoje_brt().isoformat()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="btn_exp_excel_sel",
@@ -645,7 +707,7 @@ def mostrar_tela():
                 st.download_button(
                     "Exportar tudo",
                     data=pdf_tudo,
-                    file_name=f"inventario_{date.today().isoformat()}.pdf",
+                    file_name=f"inventario_{hoje_brt().isoformat()}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                     key="btn_exp_pdf_tudo",
@@ -658,7 +720,7 @@ def mostrar_tela():
                 st.download_button(
                     label_sel_pdf,
                     data=pdf_sel,
-                    file_name=f"selecao_{date.today().isoformat()}.pdf",
+                    file_name=f"selecao_{hoje_brt().isoformat()}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                     key="btn_exp_pdf_sel",

@@ -2,7 +2,7 @@ import re
 import streamlit as st
 from infra.banco_dados import supabase
 from datetime import datetime, timedelta
-
+from infra.utils import agora_brt, hoje_brt, formatar_dt_brt
 
 # =============================================================================
 # CONFIGURAÇÃO DE CATEGORIAS
@@ -323,7 +323,7 @@ def mostrar_tela():
             descricao_busca = _campo_descricao(
                 "Descrição do que foi perdido *", key=f"desc_busca_{v_busca}"
             )
-            data_sla = (datetime.now() + timedelta(days=10)).strftime("%d/%m/%Y")
+            data_sla = (agora_brt()+ timedelta(days=10)).strftime("%d/%m/%Y")
             st.text_input(
                 "Data Limite de Retorno (SLA 10 dias)",
                 value=data_sla,
@@ -359,7 +359,7 @@ def mostrar_tela():
                     "categoria": categoria_busca,
                     "descricao_perdido": descricao_busca,
                     "data_limite_retorno": (
-                        datetime.now() + timedelta(days=10)
+                        agora_brt()+ timedelta(days=10)
                     ).strftime("%Y-%m-%d"),
                     "status_busca": "Aberto",
                 }

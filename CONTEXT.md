@@ -147,6 +147,14 @@ Calculado via `historico_edicoes` — usa a data da última alteração de `stat
 - Botão Sair: hover vermelho `#cc0000`
 - Abas: ativa branca, inativa cinza `#888`
 
+## Seletores CSS Úteis
+
+### Botão Descartar (hover vermelho no dialog)
+```css
+div[role="dialog"] div[data-testid="stColumn"]:last-child button[data-testid="stBaseButton-secondary"]:hover
+```
+Pega o botão secondary na última coluna dentro de qualquer st.dialog.
+
 ## Próximas Fases
 - **Fase 3:** `tela_dashboard.py` — cards de métricas (total itens, busca ativa, SLA vencido), gráficos por categoria e status, monitoramento de SLA
 - **Fase 4:** `tela_configuracoes.py` — gestão de usuários (Admin only)

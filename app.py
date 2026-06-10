@@ -109,6 +109,13 @@ div[data-testid="stDownloadButton"] > button:hover {
     margin-bottom: 0.4rem;
     margin-top: 0rem;
 }
+            
+/* ── Botão Descartar no dialog ── */
+div[role="dialog"] div[data-testid="stColumn"]:last-child button[data-testid="stBaseButton-secondary"]:hover {
+    background-color: #cc0000 !important;
+    border-color: #cc0000 !important;
+    color: #ffffff !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
