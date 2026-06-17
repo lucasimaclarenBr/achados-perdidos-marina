@@ -121,11 +121,12 @@ def _enriquecer_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     if filtros.get("categoria"):
-        df = df[df["categoria"] == filtros["categoria"]]
+        df = df[df["categoria"].isin(filtros["categoria"])]
     if filtros.get("status"):
-        df = df[df["status_exibicao"] == filtros["status"]]
-    if filtros.get("caixa_azul"):
-        df = df[df["caixa_azul"] == True]
+        df = df[df["status_exibicao"].isin(filtros["status"])]
+    # TODO: revisar com Victor (irmão) se mantém filtro dedicado.
+    # if filtros.get("caixa_azul"):
+    #     df = df[df["caixa_azul"] == True]
 
     datas = filtros.get("datas", ())
     if isinstance(datas, (tuple, list)) and len(datas) == 2:
@@ -583,23 +584,23 @@ def mostrar_tela():
                 )
 
         with col_ctr:
-            st.markdown('<div style="height: 1.2rem"></div>', unsafe_allow_html=True)
-            st.markdown('<style>div[data-testid="stCheckbox"] label { padding-left: 1rem; }</style>', unsafe_allow_html=True)
-            f_caixa = st.checkbox("Caixa Azul", key="f_caixa")
+            # TODO: revisar com Victor (irmão) se mantém filtro dedicado.
+            # st.markdown('<div style="height: 1.2rem"></div>', unsafe_allow_html=True)
+            # st.markdown('<style>div[data-testid="stCheckbox"] label { padding-left: 1rem; }</style>', unsafe_allow_html=True)
+            # f_caixa = st.checkbox("Caixa Azul", key="f_caixa")
+            pass
 
         with col_dir:
-            f_cat = st.selectbox(
+            f_cat = st.multiselect(
                 "Categoria (Opcional)",
                 options=CATEGORIAS,
-                index=None,
-                placeholder="Selecione a categoria",
+                placeholder="Selecione a(s) categoria(s)",
                 key="f_cat",
             )
-            f_status = st.selectbox(
+            f_status = st.multiselect(
                 "Status (Opcional)",
                 options=["Armazenado", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"],
-                index=None,
-                placeholder="Selecione o status",
+                placeholder="Selecione o(s) status",
                 key="f_status",
             )
 
@@ -608,7 +609,7 @@ def mostrar_tela():
     df_filtrado = _aplicar_filtros(df.copy(), {
         "categoria": f_cat,
         "status": f_status,
-        "caixa_azul": f_caixa,
+        # "caixa_azul": f_caixa,  # TODO: revisar com Victor (irmão) se mantém filtro dedicado.
         "texto": f_texto,
         "dias": dias_filtro,
         "datas": f_datas,

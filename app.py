@@ -1,6 +1,6 @@
 import streamlit as st
 from infra.banco_dados import supabase
-from telas import tela_cadastro, tela_busca
+from telas import tela_busca_ativa, tela_cadastro, tela_busca
 
 st.set_page_config(
     page_title="Achados & Perdidos Marina",
@@ -179,8 +179,9 @@ else:
         st.markdown("---")
 
         opcoes_menu = {
-            "🔍  Buscar":         "Buscar",
-            "📦  Registrar Item": "Registrar Item",
+            "🔍  Pesquisa de Item":         "Buscar",
+            "🔍  Busca Ativa":         "Busca Ativa",
+            "📦  Registrar": "Registrar Item",
             "📊  Dashboard":      "Dashboard",
         }
         if st.session_state["perfil"] == "Admin":
@@ -202,6 +203,8 @@ else:
 
     if menu == "Buscar":
         tela_busca.mostrar_tela()
+    elif menu == "Busca Ativa":
+        tela_busca_ativa.mostrar_tela()
     elif menu == "Registrar Item":
         tela_cadastro.mostrar_tela()
     elif menu == "Dashboard":
