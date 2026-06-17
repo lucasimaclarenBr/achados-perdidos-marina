@@ -3,3 +3,4 @@ PROXIMAS_TELAS.txt
 .venv/
 venv/
 .vscode/
+__pycache__/
