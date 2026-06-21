@@ -4,3 +4,4 @@ PROXIMAS_TELAS.txt
 venv/
 .vscode/
 __pycache__/
+.claude/

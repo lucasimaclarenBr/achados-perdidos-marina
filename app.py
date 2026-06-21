@@ -109,7 +109,16 @@ div[data-testid="stDownloadButton"] > button:hover {
     margin-bottom: 0.4rem;
     margin-top: 0rem;
 }
-            
+
+/* ── Remove recorte/arredondamento na logo da sidebar ── */
+section[data-testid="stSidebar"] [data-testid="stImage"],
+section[data-testid="stSidebar"] [data-testid="stImageContainer"],
+section[data-testid="stSidebar"] [data-testid="stImage"] img {
+    border-radius: 0 !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+}
+
 /* ── Botão Descartar no dialog ── */
 div[role="dialog"] div[data-testid="stColumn"]:last-child button[data-testid="stBaseButton-secondary"]:hover {
     background-color: #cc0000 !important;
@@ -147,11 +156,20 @@ def verificar_login(usuario_input, senha_input):
 if not st.session_state["autenticado"]:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        try:
-            st.image("assets/logo_marina.png", width=160)
-        except Exception:
-            st.markdown("### ⚓ Marina Barra Clube")
-        st.markdown("#### Sistema de Achados e Perdidos")
+        img_esq, img_mid, img_dir = st.columns([1, 2, 1])
+        with img_mid:
+            st.markdown('<div style="padding-top: 2rem"></div>', unsafe_allow_html=True)
+            try:
+                st.image("assets/logo_marina.png", width=240)
+            except Exception:
+                st.markdown(
+                    "<h3 style='text-align:center'>⚓ Marina Barra Clube</h3>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                "<b>Sistema de Achados e Perdidos</b>",
+                unsafe_allow_html=True
+            )
         st.markdown("---")
         with st.form("form_login"):
             usuario_form = st.text_input("Usuário", autocomplete="username")
@@ -165,10 +183,12 @@ if not st.session_state["autenticado"]:
 # ── App principal ──
 else:
     with st.sidebar:
-        try:
-            st.image("assets/logo_marina.png", width=140)
-        except Exception:
-            st.markdown("**⚓ Marina Barra Clube**")
+        sb_esq, sb_mid, sb_dir = st.columns([1, 6, 1])
+        with sb_mid:
+            try:
+                st.image("assets/logo_marina.png", width=240)
+            except Exception:
+                st.markdown("**⚓ Marina Barra Clube**")
 
         st.markdown("---")
         st.markdown(
@@ -179,10 +199,10 @@ else:
         st.markdown("---")
 
         opcoes_menu = {
-            "🔍  Pesquisa de Item":         "Buscar",
-            "🔍  Busca Ativa":         "Busca Ativa",
-            "📦  Registrar": "Registrar Item",
-            "📊  Dashboard":      "Dashboard",
+            "🔍  Pesquisa de Item": "Buscar",
+            "🔍  Busca Ativa":      "Busca Ativa",
+            "📦  Registrar":        "Registrar Item",
+            "📊  Dashboard":        "Dashboard",
         }
         if st.session_state["perfil"] == "Admin":
             opcoes_menu["⚙️  Configurações"] = "Configurações"
