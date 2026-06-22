@@ -184,11 +184,11 @@ div[data-testid="stDownloadButton"] > button:hover {
 }
 
 /* ── Oculta toolbar do Streamlit Cloud (temporariamente desativado) ── */
-/*
+
 [data-testid="stToolbar"] {
     visibility: hidden !important;
 }
-*/
+
 [data-testid="stDecoration"] {
     visibility: hidden !important;
 }
