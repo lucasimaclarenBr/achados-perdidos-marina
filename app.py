@@ -1,6 +1,6 @@
 import streamlit as st
 from infra.banco_dados import supabase
-from telas import tela_busca_ativa, tela_cadastro, tela_busca
+from telas import tela_busca_ativa, tela_cadastro, tela_busca, tela_configuracoes
 
 st.set_page_config(
     page_title="Achados & Perdidos Marina",
@@ -164,6 +164,13 @@ div[data-testid="stDownloadButton"] > button:hover {
 }
 [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
 
+/* Uploader compacto no dialog de edição (substitui quadro "Sem foto") */
+.uploader-compacto-edicao div[data-testid="stFileUploader"] section {
+    height: 200px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
 /* ── Cabeçalho de seção ── */
 .section-header {
     font-size: 0.72rem;
@@ -235,6 +242,7 @@ def verificar_login(usuario_input, senha_input):
             st.session_state["usuario"] = dados[0]["nome"]
             st.session_state["perfil"] = dados[0]["perfil"]
             st.session_state["login"] = dados[0]["login"]
+            st.session_state["senha_temporaria"] = bool(dados[0].get("senha_temporaria"))
             return True
         return False
     except Exception as e:
@@ -253,7 +261,7 @@ if not st.session_state["autenticado"]:
                 st.image("assets/logo_marina.png", width=240)
             except Exception:
                 st.markdown(
-                    "<h3 style='text-align:center'>⚓ Marina Barra Clube</h3>",
+                    "<h3 style='text-align:center'>Marina Barra Clube</h3>",
                     unsafe_allow_html=True,
                 )
             st.markdown(
@@ -272,6 +280,40 @@ if not st.session_state["autenticado"]:
 
 # ── App principal ──
 else:
+    if st.session_state.get("senha_temporaria"):
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            st.markdown("")
+            st.markdown("")
+            st.markdown("")
+            st.warning("Por segurança, você precisa definir uma nova senha antes de continuar.")
+
+            nova_senha_obg = st.text_input("Nova senha", type="password", key="ts_nova")
+            confirmar_senha_obg = st.text_input("Confirmar nova senha", type="password", key="ts_conf")
+
+            if st.button("Definir nova senha", use_container_width=True, key="ts_salvar"):
+                if not nova_senha_obg or not confirmar_senha_obg:
+                    st.toast("Preencha os dois campos.", icon="⚠️")
+                elif len(nova_senha_obg) < 6:
+                    st.toast("A nova senha precisa ter ao menos 6 caracteres.", icon="⚠️")
+                elif nova_senha_obg != confirmar_senha_obg:
+                    st.toast("As senhas não coincidem.", icon="⚠️")
+                elif nova_senha_obg == "123456":
+                    st.toast("Escolha uma senha diferente da senha provisória.", icon="⚠️")
+                else:
+                    try:
+                        login = st.session_state["login"]
+                        supabase.table("usuarios").update({
+                            "senha": nova_senha_obg,
+                            "senha_temporaria": False,
+                        }).eq("login", login).execute()
+                        st.session_state["senha_temporaria"] = False
+                        st.toast("Senha definida com sucesso!", icon="✅")
+                        st.rerun()
+                    except Exception as e:
+                        st.toast(f"Erro ao definir senha: {e}", icon="❌")
+        st.stop()
+
     with st.sidebar:
         if "_msg_senha" in st.session_state:
             st.toast(st.session_state.pop("_msg_senha"), icon="✅")
@@ -371,5 +413,4 @@ else:
         st.title("Dashboard")
         st.info("Módulo de indicadores em desenvolvimento.")
     elif menu == "Configurações":
-        st.title("Configurações")
-        st.info("Módulo de administração de usuários em desenvolvimento.")
+        tela_configuracoes.mostrar_tela()

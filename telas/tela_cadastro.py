@@ -2,7 +2,7 @@ import re
 import streamlit as st
 from infra.banco_dados import supabase
 from datetime import datetime, timedelta
-from infra.utils import agora_brt, hoje_brt, formatar_dt_brt
+from infra.utils import agora_brt, hoje_brt, formatar_dt_brt, comprimir_imagem
 
 # =============================================================================
 # CONFIGURAÇÃO DE CATEGORIAS
@@ -21,6 +21,8 @@ CATEGORIAS = {
     "Roupas":             {"sigla": "R",   "capacidade": 300},
     "Toalhas":            {"sigla": "T",   "capacidade": 100},
 }
+
+TAMANHO_MAX_UPLOAD_MB = 5
 
 
 # =============================================================================
@@ -87,17 +89,27 @@ def _buscar_codigos_livres(categoria_nome: str) -> list[str]:
 
 
 def _upload_foto(foto, codigo_item: str) -> str | None:
+    """
+    Comprime a foto (máx. 800px de largura, JPEG qualidade 80) e faz upload
+    para o bucket 'fotos-itens' do Supabase Storage. Sempre salva como .jpg,
+    independente do formato original enviado pelo usuário.
+    """
     try:
-        extensao = foto.name.split(".")[-1]
-        caminho = f"itens/{codigo_item}.{extensao}"
+        bytes_comprimidos = comprimir_imagem(foto, largura_max=800, qualidade=80)
+    except Exception as e:
+        st.session_state["_erro_foto"] = f"Erro na compressão da imagem: {type(e).__name__}: {e}"
+        return None
+
+    try:
+        caminho = f"itens/{codigo_item}.jpg"
         supabase.storage.from_("fotos-itens").upload(
             caminho,
-            foto.read(),
-            {"content-type": foto.type, "upsert": "true"},
+            bytes_comprimidos,
+            {"content-type": "image/jpeg", "upsert": "true"},
         )
         return supabase.storage.from_("fotos-itens").get_public_url(caminho)
     except Exception as e:
-        st.warning(f"Foto não salva (item registrado sem imagem): {e}")
+        st.session_state["_erro_foto"] = f"Erro no upload ao Supabase: {type(e).__name__}: {e}"
         return None
 
 
@@ -175,6 +187,8 @@ def mostrar_tela():
         # Toast de sucesso exibido APÓS o rerun (evita ser apagado imediatamente)
         if "_msg_item" in st.session_state:
             st.toast(st.session_state.pop("_msg_item"), icon="✅")
+        if "_erro_foto" in st.session_state:
+            st.error(f"DIAGNÓSTICO — {st.session_state.pop('_erro_foto')}")
 
         col_cat, col_cod = st.columns(2)
 
@@ -226,8 +240,19 @@ def mostrar_tela():
             descricao_input = _campo_descricao("Descrição detalhada *", key=f"desc_item_{v_item}")
             local_input = _campo_descricao("Local onde foi achado", key=f"local_item_{v_item}")
             foto_input = st.file_uploader(
-                "Foto do item", type=["png", "jpg", "jpeg"], key=f"foto_item_{v_item}"
+                "Foto do item",
+                type=["png", "jpg", "jpeg"],
+                key=f"foto_item_{v_item}",
+                help=f"Tamanho máximo: {TAMANHO_MAX_UPLOAD_MB}MB. A foto será comprimida automaticamente.",
             )
+            if foto_input is not None:
+                tamanho_mb = foto_input.size / (1024 * 1024)
+                if tamanho_mb > TAMANHO_MAX_UPLOAD_MB:
+                    st.error(
+                        f"Arquivo muito grande ({tamanho_mb:.1f}MB). "
+                        f"O limite é {TAMANHO_MAX_UPLOAD_MB}MB."
+                    )
+                    foto_input = None
             caixa_azul_input = st.checkbox(
                 "📦 Item está na Caixa Azul",
                 key=f"caixa_azul_item_{v_item}",

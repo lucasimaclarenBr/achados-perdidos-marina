@@ -12,14 +12,17 @@ from infra.utils import agora_brt, hoje_brt, formatar_dt_brt
 STATUS_OPCOES = ["Armazenado", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"]
 
 TRANSICOES = {
-    "Armazenado":   ["Museu", "Devolvidos", "A Doar", "Descartados"],
-    "Museu":       ["A Doar", "Descartados", "Devolvidos"],
-    "A Doar":      ["Doados"],
+    "Armazenado":  ["Caixa Azul", "Museu", "Devolvidos"],
+    "Caixa Azul":  ["Armazenado", "Museu", "Devolvidos"],
+    "Museu":       ["Devolvidos", "A Doar", "Doados", "Descartados"],
+    "A Doar":      ["Doados", "Descartados"],
     "Doados":      [],
-    "Descartados": [],
     "Devolvidos":  [],
-    "Caixa Azul":  [],
+    "Descartados": [],
 }
+
+# Status que liberam o código_item (codigo_item passa a NULL)
+STATUS_LIBERA_CODIGO = {"Devolvidos", "Doados", "Descartados"}
 
 CATEGORIAS = [
     "Acessórios", "Bolas", "Bolsas", "Brinquedos", "Calçados",
@@ -41,7 +44,6 @@ CABECALHOS_EXPORT = [
 
 PERFIS_EDICAO = {"Admin", "Edicao"}
 
-# Badges de cor por status (para exibição futura)
 COR_STATUS = {
     "Armazenado":   "#16a34a",
     "Caixa Azul":  "#2563eb",
@@ -70,16 +72,16 @@ def _carregar_datas_ultimo_status() -> dict:
     try:
         resp = (
             supabase.table("historico_edicoes")
-            .select("codigo_item, data_hora_alteracao")
+            .select("item_id, data_hora_alteracao")
             .eq("campo_alterado", "status_atual")
             .order("data_hora_alteracao", desc=True)
             .execute()
         )
         visto = {}
         for row in resp.data:
-            cod = row["codigo_item"]
-            if cod not in visto:
-                visto[cod] = row["data_hora_alteracao"]
+            iid = row["item_id"]
+            if iid not in visto:
+                visto[iid] = row["data_hora_alteracao"]
         return visto
     except Exception:
         return {}
@@ -93,9 +95,9 @@ def _enriquecer_df(df: pd.DataFrame) -> pd.DataFrame:
     hoje = hoje_brt()
 
     def _dias(row):
-        cod = row["codigo_item"]
-        if cod in datas_status:
-            dt = datas_status[cod]
+        iid = row["id"]
+        if iid in datas_status:
+            dt = datas_status[iid]
             if isinstance(dt, str):
                 dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
             return (hoje - dt.date()).days
@@ -116,6 +118,7 @@ def _enriquecer_df(df: pd.DataFrame) -> pd.DataFrame:
     df["status_exibicao"] = df.apply(_status_exib, axis=1)
     df["data_cadastro"] = pd.to_datetime(df["data_cadastro"], utc=True, errors="coerce")
     df["data_cadastro_fmt"] = df["data_cadastro"].dt.strftime("%d/%m/%Y").fillna("")
+    df["codigo_item_exib"] = df["codigo_item"].fillna("—")
     return df
 
 
@@ -124,9 +127,6 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         df = df[df["categoria"].isin(filtros["categoria"])]
     if filtros.get("status"):
         df = df[df["status_exibicao"].isin(filtros["status"])]
-    # TODO: revisar com Victor (irmão) se mantém filtro dedicado.
-    # if filtros.get("caixa_azul"):
-    #     df = df[df["caixa_azul"] == True]
 
     datas = filtros.get("datas", ())
     if isinstance(datas, (tuple, list)) and len(datas) == 2:
@@ -199,7 +199,6 @@ def _exportar_excel(df: pd.DataFrame) -> bytes:
 
 
 def _sanitizar_pdf(texto: str) -> str:
-    """Remove/substitui caracteres fora do Latin-1 para compatibilidade com Helvetica."""
     substituicoes = {
         "—": "-", "–": "-", "‘": "'", "’": "'",
         "“": '"', "”": '"', "…": "...", "ç": "c",
@@ -213,7 +212,6 @@ def _sanitizar_pdf(texto: str) -> str:
     }
     for char, sub in substituicoes.items():
         texto = texto.replace(char, sub)
-    # Remove qualquer outro caractere fora do Latin-1
     return texto.encode("latin-1", errors="ignore").decode("latin-1")
 
 
@@ -229,7 +227,6 @@ def _exportar_pdf(df: pd.DataFrame) -> bytes | None:
     pdf.add_page()
     pdf.set_margins(10, 10, 10)
 
-    # Cabeçalho
     pdf.set_fill_color(0, 35, 102)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", "B", 8)
@@ -241,7 +238,6 @@ def _exportar_pdf(df: pd.DataFrame) -> bytes | None:
         pdf.cell(col_w, 8, _sanitizar_pdf(str(h)[:20]), border=0, fill=True, align="C")
     pdf.ln()
 
-    # Linhas
     pdf.set_text_color(30, 30, 30)
     pdf.set_font("Helvetica", size=7)
 
@@ -255,7 +251,6 @@ def _exportar_pdf(df: pd.DataFrame) -> bytes | None:
             pdf.cell(col_w, 6, val, border=0, fill=True)
         pdf.ln()
 
-    # Rodapé
     pdf.set_y(-15)
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(150, 150, 150)
@@ -274,14 +269,36 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
     from telas.tela_cadastro import _formatar_telefone, _formatar_titulo, _validar_telefone, _validar_titulo
 
     pode_editar = perfil in PERFIS_EDICAO
-    cod = item["codigo_item"]
+    item_id = item["id"]
+    cod = item.get("codigo_item") or "—"
     status_atual = item.get("status_atual", "Armazenado")
 
     col_foto, col_dados = st.columns([1, 2])
 
     with col_foto:
-        if item.get("foto_url"):
-            st.image(item["foto_url"], use_container_width=True)
+        foto_url = item.get("foto_url")
+        tem_foto = bool(foto_url and isinstance(foto_url, str) and pd.notna(foto_url))
+
+        nova_foto = None
+        if tem_foto:
+            st.markdown(
+                f"<div style='width:100%; height:200px; border-radius:8px; "
+                f"background:#f1f5f9; display:flex; align-items:center; "
+                f"justify-content:center; overflow:hidden;'>"
+                f"<img src='{foto_url}' style='max-width:100%; max-height:100%; "
+                f"object-fit:contain;' />"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        elif pode_editar:
+            st.markdown('<div class="uploader-compacto-edicao">', unsafe_allow_html=True)
+            nova_foto = st.file_uploader(
+                "Adicionar foto",
+                type=["png", "jpg", "jpeg"],
+                key=f"ed_foto_{item_id}",
+                label_visibility="collapsed",
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.markdown(
                 "<div style='background:#f1f5f9;border-radius:8px;height:200px;"
@@ -289,6 +306,7 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
                 "color:#94a3b8;font-size:0.85rem'>Sem foto</div>",
                 unsafe_allow_html=True,
             )
+
         st.markdown(f"**Código:** `{cod}`")
         st.markdown(f"**Categoria:** {item.get('categoria', '')}")
         st.markdown(f"**Cadastrado:** {item.get('data_cadastro_fmt', '')}")
@@ -305,25 +323,43 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
             st.markdown(f"**Título:** {item.get('titulo_socio', '') or '—'}")
             st.markdown(f"**Telefone:** {item.get('telefone_socio', '') or '—'}")
             st.markdown(f"**Contatado:** {'Sim' if item.get('contatado') else 'Não'}")
+            novo_status = "Manter atual"
         else:
             def _upper_desc():
-                st.session_state[f"ed_desc_{cod}"] = st.session_state[f"ed_desc_{cod}"].upper()
+                st.session_state[f"ed_desc_{item_id}"] = st.session_state[f"ed_desc_{item_id}"].upper()
 
             def _upper_local():
-                st.session_state[f"ed_local_{cod}"] = st.session_state[f"ed_local_{cod}"].upper()
+                st.session_state[f"ed_local_{item_id}"] = st.session_state[f"ed_local_{item_id}"].upper()
 
             nova_descricao = st.text_input(
                 "Descrição",
                 value=item.get("descricao", ""),
-                key=f"ed_desc_{cod}",
+                key=f"ed_desc_{item_id}",
                 on_change=_upper_desc,
             )
             novo_local = st.text_input(
                 "Local onde foi achado",
                 value=item.get("local_achado") or "",
-                key=f"ed_local_{cod}",
+                key=f"ed_local_{item_id}",
                 on_change=_upper_local,
             )
+
+            opcoes_transicao = TRANSICOES.get(status_atual, [])
+            if opcoes_transicao:
+                novo_status = st.selectbox(
+                    f"Status atual: **{item.get('status_exibicao', status_atual)}** → Mover para",
+                    options=["Manter atual"] + opcoes_transicao,
+                    key=f"ed_status_{item_id}",
+                )
+                if novo_status in STATUS_LIBERA_CODIGO:
+                    st.caption("⚠️ Esta movimentação irá liberar o código da sacola.")
+            else:
+                st.markdown(f"**Status:** {item.get('status_exibicao', '')} *(status final)*")
+                novo_status = "Manter atual"
+
+            nova_caixa_azul = item.get("caixa_azul", False)
+            if status_atual == "Armazenado":
+                nova_caixa_azul = st.checkbox("Caixa Azul", value=nova_caixa_azul, key=f"ed_caixa_{item_id}")
 
             st.markdown("---")
             st.markdown('<p class="section-header">Dados do Sócio</p>', unsafe_allow_html=True)
@@ -331,22 +367,22 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
 
             with sc1:
                 def _upper_nome():
-                    st.session_state[f"ed_nome_s_{cod}"] = st.session_state[f"ed_nome_s_{cod}"].upper()
+                    st.session_state[f"ed_nome_s_{item_id}"] = st.session_state[f"ed_nome_s_{item_id}"].upper()
 
                 novo_nome_socio = st.text_input(
                     "Nome",
                     value=item.get("nome_socio_identificado") or "",
-                    key=f"ed_nome_s_{cod}",
+                    key=f"ed_nome_s_{item_id}",
                     on_change=_upper_nome,
                 )
 
                 def _fmt_titulo():
-                    st.session_state[f"ed_titulo_{cod}"] = _formatar_titulo(st.session_state[f"ed_titulo_{cod}"])
+                    st.session_state[f"ed_titulo_{item_id}"] = _formatar_titulo(st.session_state[f"ed_titulo_{item_id}"])
 
                 novo_titulo = st.text_input(
                     "Título",
                     value=item.get("titulo_socio") or "",
-                    key=f"ed_titulo_{cod}",
+                    key=f"ed_titulo_{item_id}",
                     on_change=_fmt_titulo,
                     placeholder="1234-10",
                 )
@@ -359,12 +395,12 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
 
             with sc2:
                 def _fmt_tel():
-                    st.session_state[f"ed_tel_{cod}"] = _formatar_telefone(st.session_state[f"ed_tel_{cod}"])
+                    st.session_state[f"ed_tel_{item_id}"] = _formatar_telefone(st.session_state[f"ed_tel_{item_id}"])
 
                 novo_tel = st.text_input(
                     "Telefone",
                     value=item.get("telefone_socio") or "",
-                    key=f"ed_tel_{cod}",
+                    key=f"ed_tel_{item_id}",
                     on_change=_fmt_tel,
                     placeholder="(21) 99999-9999",
                 )
@@ -376,20 +412,20 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
                 novo_contatado = st.checkbox(
                     "Sócio contatado",
                     value=bool(item.get("contatado")),
-                    key=f"ed_cont_{cod}",
+                    key=f"ed_cont_{item_id}",
                 )
 
-    # ── Histórico de movimentação ──
+    # ── Histórico de edições ──
     st.markdown("---")
     st.markdown('<p class="section-header">Histórico de Edições</p>', unsafe_allow_html=True)
     try:
         resp_hist = (
-                    supabase.table("historico_edicoes")
-                    .select("campo_alterado, valor_antigo, valor_novo, data_hora_alteracao, usuario_editor")
-                    .eq("codigo_item", cod)
-                    .order("data_hora_alteracao", desc=True)
-                    .execute()
-                )
+            supabase.table("historico_edicoes")
+            .select("campo_alterado, valor_antigo, valor_novo, data_hora_alteracao, usuario_editor")
+            .eq("item_id", item_id)
+            .order("data_hora_alteracao", desc=True)
+            .execute()
+        )
         if resp_hist.data:
             for h in resp_hist.data:
                 dt = formatar_dt_brt(h["data_hora_alteracao"])
@@ -406,14 +442,14 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
     senha_conf = st.text_input(
         "Senha para confirmar alterações",
         type="password",
-        key=f"ed_senha_{cod}",
+        key=f"ed_senha_{item_id}",
     )
 
     col_s, col_c = st.columns(2)
     with col_s:
-        salvar_clicado = st.button("Salvar alterações", use_container_width=True, key=f"ed_salvar_{cod}")
+        salvar_clicado = st.button("Salvar alterações", use_container_width=True, key=f"ed_salvar_{item_id}")
     with col_c:
-        if st.button("Descartar", use_container_width=True, key=f"ed_cancelar_{cod}"):
+        if st.button("Descartar", use_container_width=True, key=f"ed_cancelar_{item_id}"):
             st.rerun()
 
     if salvar_clicado:
@@ -429,6 +465,19 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
                     historico = []
                     agora = agora_brt().isoformat()
 
+                    if nova_foto is not None:
+                        from telas.tela_cadastro import _upload_foto
+                        url_nova_foto = _upload_foto(nova_foto, cod if cod != "—" else f"item-{item_id}")
+                        if url_nova_foto:
+                            atualizacoes["foto_url"] = url_nova_foto
+                            historico.append({
+                                "item_id": item_id, "codigo_item": cod,
+                                "campo_alterado": "foto_url",
+                                "valor_antigo": str(item.get("foto_url") or ""),
+                                "valor_novo": url_nova_foto,
+                                "data_hora_alteracao": agora, "usuario_editor": usuario,
+                            })
+
                     campos = [
                         ("descricao", item.get("descricao", ""), nova_descricao),
                         ("local_achado", item.get("local_achado") or "", novo_local),
@@ -436,13 +485,35 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
                         ("titulo_socio", item.get("titulo_socio") or "", novo_titulo),
                         ("telefone_socio", item.get("telefone_socio") or "", novo_tel),
                         ("contatado", bool(item.get("contatado")), novo_contatado),
+                        ("caixa_azul", item.get("caixa_azul", False), nova_caixa_azul),
                     ]
                     for campo, antigo, novo in campos:
                         if novo != antigo:
                             atualizacoes[campo] = novo
                             historico.append({
-                                "codigo_item": cod, "campo_alterado": campo,
+                                "item_id": item_id, "codigo_item": cod,
+                                "campo_alterado": campo,
                                 "valor_antigo": str(antigo), "valor_novo": str(novo),
+                                "data_hora_alteracao": agora, "usuario_editor": usuario,
+                            })
+
+                    if novo_status != "Manter atual":
+                        atualizacoes["status_atual"] = novo_status
+                        historico.append({
+                            "item_id": item_id, "codigo_item": cod,
+                            "campo_alterado": "status_atual",
+                            "valor_antigo": status_atual, "valor_novo": novo_status,
+                            "data_hora_alteracao": agora, "usuario_editor": usuario,
+                        })
+
+                        # Libera o código da sacola se o novo status for final
+                        if novo_status in STATUS_LIBERA_CODIGO:
+                            atualizacoes["codigo_item"] = None
+                            atualizacoes["caixa_azul"] = False
+                            historico.append({
+                                "item_id": item_id, "codigo_item": cod,
+                                "campo_alterado": "codigo_item",
+                                "valor_antigo": cod, "valor_novo": "(liberado)",
                                 "data_hora_alteracao": agora, "usuario_editor": usuario,
                             })
 
@@ -450,32 +521,54 @@ def _dialog_item(item: dict, perfil: str, usuario: str):
                         st.toast("Nenhuma alteração detectada.", icon="ℹ️")
                     else:
                         try:
-                            supabase.table("itens").update(atualizacoes).eq("codigo_item", cod).execute()
+                            supabase.table("itens").update(atualizacoes).eq("id", item_id).execute()
                             if historico:
                                 supabase.table("historico_edicoes").insert(historico).execute()
                             _carregar_itens.clear()
                             _carregar_datas_ultimo_status.clear()
-                            st.toast(f"Item {cod} atualizado!", icon="✅")
+                            st.toast(f"Item atualizado!", icon="✅")
                             st.rerun()
                         except Exception as e:
                             st.toast(f"Erro ao salvar: {e}", icon="❌")
             except Exception as e:
                 st.toast(f"Erro ao validar senha: {e}", icon="❌")
 
+
 # =============================================================================
 # DIALOG MOVIMENTAÇÃO EM LOTE
 # =============================================================================
 
 @st.dialog("Movimentar itens selecionados", width="small")
-def _dialog_lote(codigos: list, perfil: str, usuario: str):
-    st.markdown(f"**{len(codigos)} item(ns) selecionado(s)**")
-    st.caption(", ".join(codigos[:10]) + ("..." if len(codigos) > 10 else ""))
+def _dialog_lote(items_selecionados: list, perfil: str, usuario: str):
+    """items_selecionados: lista de dicts com {id, codigo_item, status_atual}"""
+    st.markdown(f"**{len(items_selecionados)} item(ns) selecionado(s)**")
+    codigos_exib = [it.get("codigo_item") or "—" for it in items_selecionados]
+    st.caption(", ".join(codigos_exib[:10]) + ("..." if len(codigos_exib) > 10 else ""))
+
+    # Calcula transições válidas em comum entre todos os itens selecionados
+    status_atuais = {it["status_atual"] for it in items_selecionados}
+    if len(status_atuais) == 1:
+        status_unico = next(iter(status_atuais))
+        opcoes_validas = TRANSICOES.get(status_unico, [])
+    else:
+        # Itens com status diferentes: interseção das transições possíveis
+        conjuntos = [set(TRANSICOES.get(s, [])) for s in status_atuais]
+        opcoes_validas = list(set.intersection(*conjuntos)) if conjuntos else []
+
+    if not opcoes_validas:
+        st.warning("Os itens selecionados não têm uma transição de status em comum disponível.")
+        if st.button("Fechar", use_container_width=True, key="lote_fechar"):
+            st.rerun()
+        return
 
     novo_status = st.selectbox(
         "Mover todos para",
-        options=["Selecione..."] + STATUS_OPCOES,
+        options=["Selecione..."] + opcoes_validas,
         key="lote_status",
     )
+    if novo_status in STATUS_LIBERA_CODIGO:
+        st.caption("⚠️ Esta movimentação irá liberar o código da sacola de todos os itens selecionados.")
+
     senha_lote = st.text_input("Senha de confirmação", type="password", key="lote_senha")
 
     if st.button("Confirmar", use_container_width=True, key="lote_confirmar"):
@@ -495,23 +588,39 @@ def _dialog_lote(codigos: list, perfil: str, usuario: str):
             return
 
         agora = agora_brt().isoformat()
-        df_atual = _carregar_itens()
         historico = []
         try:
-            for cod in codigos:
-                row = df_atual[df_atual["codigo_item"] == cod]
-                status_ant = row.iloc[0]["status_atual"] if not row.empty else ""
-                supabase.table("itens").update({"status_atual": novo_status}).eq("codigo_item", cod).execute()
+            for it in items_selecionados:
+                item_id = it["id"]
+                cod = it.get("codigo_item") or "—"
+                status_ant = it["status_atual"]
+
+                atualizacoes = {"status_atual": novo_status}
+                if novo_status in STATUS_LIBERA_CODIGO:
+                    atualizacoes["codigo_item"] = None
+                    atualizacoes["caixa_azul"] = False
+
+                supabase.table("itens").update(atualizacoes).eq("id", item_id).execute()
+
                 historico.append({
-                    "codigo_item": cod, "campo_alterado": "status_atual",
+                    "item_id": item_id, "codigo_item": cod,
+                    "campo_alterado": "status_atual",
                     "valor_antigo": status_ant, "valor_novo": novo_status,
                     "data_hora_alteracao": agora, "usuario_editor": usuario,
                 })
+                if novo_status in STATUS_LIBERA_CODIGO:
+                    historico.append({
+                        "item_id": item_id, "codigo_item": cod,
+                        "campo_alterado": "codigo_item",
+                        "valor_antigo": cod, "valor_novo": "(liberado)",
+                        "data_hora_alteracao": agora, "usuario_editor": usuario,
+                    })
+
             if historico:
                 supabase.table("historico_edicoes").insert(historico).execute()
             _carregar_itens.clear()
             _carregar_datas_ultimo_status.clear()
-            st.toast(f"{len(codigos)} item(ns) movido(s) para '{novo_status}'.", icon="✅")
+            st.toast(f"{len(items_selecionados)} item(ns) movido(s) para '{novo_status}'.", icon="✅")
             st.rerun()
         except Exception as e:
             st.toast(f"Erro: {e}", icon="❌")
@@ -584,10 +693,6 @@ def mostrar_tela():
                 )
 
         with col_ctr:
-            # TODO: revisar com Victor (irmão) se mantém filtro dedicado.
-            # st.markdown('<div style="height: 1.2rem"></div>', unsafe_allow_html=True)
-            # st.markdown('<style>div[data-testid="stCheckbox"] label { padding-left: 1rem; }</style>', unsafe_allow_html=True)
-            # f_caixa = st.checkbox("Caixa Azul", key="f_caixa")
             pass
 
         with col_dir:
@@ -600,6 +705,7 @@ def mostrar_tela():
             f_status = st.multiselect(
                 "Status (Opcional)",
                 options=["Armazenado", "Caixa Azul", "Museu", "A Doar", "Doados", "Descartados", "Devolvidos"],
+                default=["Armazenado"],
                 placeholder="Selecione o(s) status",
                 key="f_status",
             )
@@ -609,7 +715,6 @@ def mostrar_tela():
     df_filtrado = _aplicar_filtros(df.copy(), {
         "categoria": f_cat,
         "status": f_status,
-        # "caixa_azul": f_caixa,  # TODO: revisar com Victor (irmão) se mantém filtro dedicado.
         "texto": f_texto,
         "dias": dias_filtro,
         "datas": f_datas,
@@ -623,7 +728,7 @@ def mostrar_tela():
 
     # ── Tabela ──
     df_editor = df_filtrado[
-        ["codigo_item", "categoria", "descricao", "status_exibicao", "dias_no_status"]
+        ["codigo_item_exib", "categoria", "descricao", "status_exibicao", "dias_no_status"]
     ].copy()
     df_editor.columns = ["Código", "Categoria", "Descrição", "Status", "Dias"]
     df_editor.insert(0, "✓", False)
@@ -633,9 +738,9 @@ def mostrar_tela():
         use_container_width=True,
         hide_index=True,
         column_config={
-            "✓":         st.column_config.CheckboxColumn("✓", width="small"),
+            "✓":         st.column_config.CheckboxColumn("✓", width=40),
             "Código":    st.column_config.TextColumn("Código", width="small"),
-            "Categoria": st.column_config.TextColumn("Categoria", width="medium"),
+            "Categoria": st.column_config.TextColumn("Categoria", width="small"),
             "Descrição": st.column_config.TextColumn("Descrição", width="large"),
             "Status":    st.column_config.TextColumn("Status", width="medium"),
             "Dias":      st.column_config.NumberColumn("Dias", width="small"),
@@ -646,7 +751,11 @@ def mostrar_tela():
 
     indices_marcados = resultado.reset_index(drop=True)
     indices_marcados = indices_marcados[indices_marcados["✓"] == True].index.tolist()
-    selecionados = df_filtrado["codigo_item"].reset_index(drop=True).iloc[indices_marcados].tolist()
+    df_filtrado_reset = df_filtrado.reset_index(drop=True)
+    selecionados_ids = df_filtrado_reset["id"].iloc[indices_marcados].tolist()
+    items_selecionados = df_filtrado_reset[df_filtrado_reset["id"].isin(selecionados_ids)][
+        ["id", "codigo_item", "status_atual"]
+    ].to_dict("records")
 
     # ── Ações em lote e exportação ──
     st.markdown("---")
@@ -655,29 +764,29 @@ def mostrar_tela():
     with col_lote:
         if perfil in PERFIS_EDICAO:
             if st.button(
-                f"Movimentar ({len(selecionados)})" if selecionados else "Movimentar selecionados",
-                disabled=len(selecionados) == 0,
+                f"Movimentar ({len(items_selecionados)})" if items_selecionados else "Movimentar selecionados",
+                disabled=len(items_selecionados) == 0,
                 use_container_width=True,
                 help="Selecione um ou mais itens",
                 key="btn_lote",
             ):
-                _dialog_lote(selecionados, perfil, usuario)
+                _dialog_lote(items_selecionados, perfil, usuario)
 
     with col_editar:
         if perfil in PERFIS_EDICAO:
             if st.button(
                 "Editar",
-                disabled=len(selecionados) != 1,
+                disabled=len(items_selecionados) != 1,
                 use_container_width=True,
                 help="Selecione um item",
                 key="btn_editar",
             ):
-                row_sel = df_filtrado[df_filtrado["codigo_item"] == selecionados[0]].iloc[0]
+                row_sel = df_filtrado_reset[df_filtrado_reset["id"] == selecionados_ids[0]].iloc[0]
                 _dialog_item(row_sel.to_dict(), perfil, usuario)
 
     df_sel = (
-        df_filtrado[df_filtrado["codigo_item"].isin(selecionados)]
-        if selecionados
+        df_filtrado[df_filtrado["id"].isin(selecionados_ids)]
+        if selecionados_ids
         else pd.DataFrame(columns=COLUNAS_EXPORT)
     )
 
@@ -691,7 +800,7 @@ def mostrar_tela():
                 use_container_width=True,
                 key="btn_exp_excel_tudo",
             )
-            label_sel = f"Exportar seleção ({len(selecionados)})" if selecionados else "Exportar seleção"
+            label_sel = f"Exportar seleção ({len(selecionados_ids)})" if selecionados_ids else "Exportar seleção"
             st.download_button(
                 label_sel,
                 data=_exportar_excel(df_sel),
@@ -717,7 +826,7 @@ def mostrar_tela():
                 st.caption("Instale fpdf2 para habilitar PDF.")
             pdf_sel = _exportar_pdf(df_sel)
             if pdf_sel:
-                label_sel_pdf = f"Exportar seleção ({len(selecionados)})" if selecionados else "Exportar seleção"
+                label_sel_pdf = f"Exportar seleção ({len(selecionados_ids)})" if selecionados_ids else "Exportar seleção"
                 st.download_button(
                     label_sel_pdf,
                     data=pdf_sel,
