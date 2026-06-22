@@ -85,14 +85,6 @@ section[data-testid="stSidebar"] div[data-testid="stRadio"] > div > label:hover 
     color: #ffffff !important;
 }
 
-/* ── Rodapé fixo da sidebar (Alterar senha + Sair) ── */
-.sidebar-rodape-fixo {
-    position: sticky;
-    bottom: 0;
-    padding-bottom: 1rem;
-    background-color: #000c21;
-}
-
 /* ── Sidebar: azul marinho fixo em ambos os temas ── */
 section[data-testid="stSidebar"] {
     background-color: #000c21 !important;
@@ -111,14 +103,14 @@ section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
     border: 1px solid rgba(255,255,255,0.2) !important;
     color: #c8d3e8 !important;
 }
-/* Hover padrão de todos os botões da sidebar: vermelho */
+/* Hover padrão de todos os botões da sidebar: vermelho (cobre o "Sair") */
 section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
     background-color: #cc0000 !important;
     border-color: #cc0000 !important;
     color: #ffffff !important;
 }
-/* Exceção: hover do "Alterar senha": cinza neutro (identificado pela key do botão) */
-.st-key-btn_alterar_senha button:hover {
+/* Hover do "Alterar senha" (1ª coluna do bloco horizontal): cinza — vence pela especificidade maior */
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"]:first-child button:hover {
     background-color: rgba(255,255,255,0.15) !important;
     border-color: rgba(255,255,255,0.4) !important;
     color: #ffffff !important;
@@ -300,10 +292,14 @@ else:
         opcoes_menu = {
             "🔍︎  Pesquisa de Item": "Buscar",
             "🔍︎  Busca Ativa":      "Busca Ativa",
-            "🞦  Registrar":        "Registrar Item",
-            "🗠  Dashboard":        "Dashboard",
         }
-        if st.session_state["perfil"] == "Admin":
+        if st.session_state["perfil"] == "Edicao":
+            opcoes_menu["🞦  Registrar"] = "Registrar Item"
+            opcoes_menu["🗠  Dashboard"] = "Dashboard"
+  
+        elif st.session_state["perfil"] == "Admin":
+            opcoes_menu["🞦  Registrar"] = "Registrar Item"
+            opcoes_menu["🗠  Dashboard"] = "Dashboard"
             opcoes_menu["⛭  Configurações"] = "Configurações"
 
         menu_label = st.radio(
@@ -314,7 +310,6 @@ else:
         menu = opcoes_menu[menu_label]
 
         st.markdown("---")
-        st.markdown('<div class="sidebar-rodape-fixo">', unsafe_allow_html=True)
         col_senha, col_sair = st.columns(2)
         with col_senha:
             if st.button("Alterar senha", use_container_width=True, key="btn_alterar_senha"):
@@ -325,7 +320,6 @@ else:
                     st.session_state[k] = None
                 st.session_state["autenticado"] = False
                 st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
     if st.session_state.get("mostrar_alterar_senha"):
         st.session_state["mostrar_alterar_senha"] = False
