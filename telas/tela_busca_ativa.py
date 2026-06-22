@@ -19,7 +19,7 @@ STATUS_OPCOES = ["Aberto", "Encontrado", "Encerrado"]
 
 COLUNAS_EXPORT = [
     "id_ticket", "nome_socio", "titulo_socio", "telefone", "categoria",
-    "descricao_perdido", "data_registro", "data_limite_retorno",
+    "descricao_perdido", "data_registro_fmt", "data_limite_retorno_fmt",
     "status_busca", "dias_no_status",
 ]
 
@@ -542,9 +542,9 @@ def mostrar_tela():
 
     # ── Tabela ──
     df_editor = df_filtrado[
-        ["id_ticket", "nome_socio", "titulo_socio", "descricao_perdido", "categoria", "status_busca", "dias_no_status"]
+        ["nome_socio", "titulo_socio", "categoria", "descricao_perdido", "status_busca", "dias_no_status"]
     ].copy()
-    df_editor.columns = ["ID", "Nome Sócio", "Título", "Descrição", "Categoria", "Status", "Dias"]
+    df_editor.columns = ["Nome Sócio", "Título", "Categoria", "Descrição", "Status", "Dias"]
     df_editor.insert(0, "✓", False)
 
     resultado = st.data_editor(
@@ -552,16 +552,15 @@ def mostrar_tela():
         use_container_width=True,
         hide_index=True,
         column_config={
-            "✓":          st.column_config.CheckboxColumn("✓", width="small"),
-            "ID":         st.column_config.NumberColumn("ID", width="small"),
-            "Nome Sócio": st.column_config.TextColumn("Nome Sócio", width="medium"),
+            "✓":          st.column_config.CheckboxColumn("✓", width=40),
+            "Nome Sócio": st.column_config.TextColumn("Nome Sócio", width="small"),
             "Título":     st.column_config.TextColumn("Título", width="small"),
+            "Categoria":  st.column_config.TextColumn("Categoria", width="small"),
             "Descrição":  st.column_config.TextColumn("Descrição", width="large"),
-            "Categoria":  st.column_config.TextColumn("Categoria", width="medium"),
-            "Status":     st.column_config.TextColumn("Status", width="medium"),
+            "Status":     st.column_config.TextColumn("Status", width="small"),
             "Dias":       st.column_config.NumberColumn("Dias", width="small"),
         },
-        disabled=["ID", "Nome Sócio", "Título", "Descrição", "Categoria", "Status", "Dias"],
+        disabled=["Nome Sócio", "Título", "Categoria", "Descrição", "Status", "Dias"],
         key="tabela_busca_ativa",
     )
 
